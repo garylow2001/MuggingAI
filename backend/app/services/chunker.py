@@ -36,6 +36,8 @@ class Chunker:
                         text += f"\n--- Page {page_num + 1} ---\n{page_text}\n"
         except Exception as e:
             print(f"Error extracting text from PDF: {e}")
+            # Return a placeholder text if PDF extraction fails
+            text = f"PDF content could not be extracted. Error: {e}"
         return text
     
     def extract_text_from_docx(self, file_path: str) -> str:
@@ -48,6 +50,8 @@ class Chunker:
                     text += paragraph.text + "\n"
         except Exception as e:
             print(f"Error extracting text from DOCX: {e}")
+            # Return a placeholder text if DOCX extraction fails
+            text = f"DOCX content could not be extracted. Error: {e}"
         return text
     
     def extract_text_from_txt(self, file_path: str) -> str:

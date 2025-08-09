@@ -8,6 +8,8 @@ engine = create_engine(settings.database_url, connect_args={"check_same_thread":
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+print(f"Database engine created with URL: {settings.database_url}")
+
 class Course(Base):
     __tablename__ = "courses"
     
@@ -21,6 +23,8 @@ class Course(Base):
     files = relationship("File", back_populates="course", cascade="all, delete-orphan")
     chunks = relationship("Chunk", back_populates="course", cascade="all, delete-orphan")
     quizzes = relationship("Quiz", back_populates="course", cascade="all, delete-orphan")
+    topics = relationship("Topic", back_populates="course", cascade="all, delete-orphan")
+    notes = relationship("Note", back_populates="course", cascade="all, delete-orphan")
 
 class File(Base):
     __tablename__ = "files"
@@ -70,6 +74,33 @@ class Quiz(Base):
     # Relationships
     course = relationship("Course", back_populates="quizzes")
 
+class Topic(Base):
+    __tablename__ = "topics"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    chapter_title = Column(String, nullable=True)
+    course_id = Column(Integer, ForeignKey("courses.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    course = relationship("Course", back_populates="topics")
+    notes = relationship("Note", back_populates="topic", cascade="all, delete-orphan")
+
+class Note(Base):
+    __tablename__ = "notes"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    content = Column(Text)
+    topic_id = Column(Integer, ForeignKey("topics.id"))
+    course_id = Column(Integer, ForeignKey("courses.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    topic = relationship("Topic", back_populates="notes")
+    course = relationship("Course", back_populates="notes")
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     
@@ -89,11 +120,19 @@ class ChatMessage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 # Create tables
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully")
+except Exception as e:
+    print(f"Error creating database tables: {e}")
 
 def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception as e:
+        print(f"Database session error: {e}")
+        db.rollback()
+        raise
     finally:
         db.close() 

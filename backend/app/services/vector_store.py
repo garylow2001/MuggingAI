@@ -47,6 +47,47 @@ class VectorStore:
         )
         return response.data[0].embedding
     
+    def create_embedding(self, text: str) -> List[float]:
+        """Synchronous wrapper for get_embedding."""
+        try:
+            response = self.client.embeddings.create(
+                model=settings.embedding_model,
+                input=text
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            print(f"Error creating embedding: {e}")
+            # Return a dummy embedding if OpenAI fails
+            return [0.0] * self.dimension
+    
+    def store_embedding(self, embedding: List[float], chunk_id: int) -> str:
+        """Store a single embedding and return its ID."""
+        # Convert to numpy array
+        embedding_array = np.array([embedding], dtype=np.float32)
+        
+        # Add to FAISS index
+        self.index.add(embedding_array)
+        
+        # Create metadata entry
+        chunk_id_str = f"chunk_{len(self.metadata)}"
+        metadata_entry = {
+            "id": chunk_id_str,
+            "content": "",  # Will be filled by the caller
+            "course_id": None,  # Will be filled by the caller
+            "file_id": None,  # Will be filled by the caller
+            "chapter_title": None,  # Will be filled by the caller
+            "chunk_index": None,  # Will be filled by the caller
+            "page_number": None,  # Will be filled by the caller
+            "faiss_index": len(self.metadata),
+            "chunk_id": chunk_id  # Reference to the database chunk
+        }
+        self.metadata.append(metadata_entry)
+        
+        # Save index
+        self._save_index()
+        
+        return chunk_id_str
+    
     async def add_chunks(self, chunks: List[Dict[str, Any]]) -> List[str]:
         """Add chunks to the vector store and return their IDs."""
         if not chunks:

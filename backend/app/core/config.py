@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./mindcrush.db"
     
     # OpenAI Configuration
-    openai_api_key: str
+    openai_api_key: str = "your_openai_api_key_here"
     openai_model: str = "gpt-4-turbo-preview"
     embedding_model: str = "text-embedding-3-small"
     
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     
     # File Upload
-    upload_dir: str = "./uploads"
+    uploads_dir: str = "./uploads"
     max_file_size: int = 50 * 1024 * 1024  # 50MB
     
     # Vector Store
@@ -40,5 +40,5 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Ensure upload directory exists
-os.makedirs(settings.upload_dir, exist_ok=True)
+os.makedirs(settings.uploads_dir, exist_ok=True)
 os.makedirs(settings.vector_store_path, exist_ok=True) 
