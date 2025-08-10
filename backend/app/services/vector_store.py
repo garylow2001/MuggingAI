@@ -6,6 +6,10 @@ from typing import List, Dict, Any, Optional
 import openai
 from app.core.config import settings
 import json
+import logging
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 class VectorStore:
     def __init__(self):
@@ -56,7 +60,7 @@ class VectorStore:
             )
             return response.data[0].embedding
         except Exception as e:
-            print(f"Error creating embedding: {e}")
+            logger.error(f"Error creating embedding: {e}")
             # Return a dummy embedding if OpenAI fails
             return [0.0] * self.dimension
     

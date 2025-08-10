@@ -3,12 +3,16 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from app.core.config import settings
+import logging
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 engine = create_engine(settings.database_url, connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-print(f"Database engine created with URL: {settings.database_url}")
+logger.info(f"Database engine created with URL: {settings.database_url}")
 
 class Course(Base):
     __tablename__ = "courses"
@@ -122,16 +126,16 @@ class ChatMessage(Base):
 # Create tables
 try:
     Base.metadata.create_all(bind=engine)
-    print("Database tables created successfully")
+    logger.info("Database tables created successfully")
 except Exception as e:
-    print(f"Error creating database tables: {e}")
+    logger.error(f"Error creating database tables: {e}")
 
 def get_db():
     db = SessionLocal()
     try:
         yield db
     except Exception as e:
-        print(f"Database session error: {e}")
+        logger.error(f"Database session error: {e}")
         db.rollback()
         raise
     finally:

@@ -3,6 +3,10 @@ from typing import List, Dict, Any, Optional
 from app.core.config import settings
 import json
 import re
+import logging
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 class NoteGenerator:
     def __init__(self):
@@ -54,7 +58,7 @@ class NoteGenerator:
                 return self._create_fallback_structure(text)
                 
         except Exception as e:
-            print(f"Error extracting topics: {e}")
+            logger.error(f"Error extracting topics: {e}")
             return self._create_fallback_structure(text)
     
     def _create_fallback_structure(self, text: str) -> Dict[str, Any]:
@@ -133,7 +137,7 @@ class NoteGenerator:
             return response.choices[0].message.content
             
         except Exception as e:
-            print(f"Error generating notes: {e}")
+            logger.error(f"Error generating notes: {e}")
             # Fallback: return a simple summary
             return f"Notes for {topic_title}:\n\n{content[:500]}..."
     

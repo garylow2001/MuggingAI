@@ -5,7 +5,7 @@ from app.models.database import get_db, Course, Topic, Note
 from pydantic import BaseModel
 from datetime import datetime
 
-router = APIRouter(prefix="/notes", tags=["notes"])
+router = APIRouter(tags=["notes"])
 
 # Pydantic models
 class TopicResponse(BaseModel):

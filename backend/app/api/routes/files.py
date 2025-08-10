@@ -10,8 +10,12 @@ from app.services.vector_store import VectorStore
 from app.core.config import settings
 import uuid
 from datetime import datetime
+import logging
 
-router = APIRouter(prefix="/files", tags=["files"])
+# Get logger for this module
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["files"])
 
 # Ensure uploads directory exists
 os.makedirs(settings.uploads_dir, exist_ok=True)
@@ -24,16 +28,16 @@ async def upload_file(
 ):
     """Upload a file to a course and process it for AI analysis."""
     
-    print(f"Starting file upload for course {course_id}")
-    print(f"File: {file.filename}, Size: {file.size}, Type: {file.content_type}")
+    logger.info(f"Starting file upload for course {course_id}")
+    logger.info(f"File: {file.filename}, Size: {file.size}, Type: {file.content_type}")
     
     # Validate course exists
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
-        print(f"Course {course_id} not found")
+        logger.error(f"Course {course_id} not found")
         raise HTTPException(status_code=404, detail="Course not found")
     
-    print(f"Course found: {course.name}")
+    logger.info(f"Course found: {course.name}")
     
     # Validate file type
     allowed_extensions = {'.pdf', '.docx', '.txt'}
@@ -55,7 +59,7 @@ async def upload_file(
     unique_filename = f"{uuid.uuid4()}{file_extension}"
     file_path = os.path.join(settings.uploads_dir, unique_filename)
     
-    print(f"Saving file to: {file_path}")
+    logger.info(f"Saving file to: {file_path}")
     
     try:
         # Save file
@@ -64,7 +68,7 @@ async def upload_file(
         
         # Get file size
         file_size = os.path.getsize(file_path)
-        print(f"File saved successfully. Size: {file_size} bytes")
+        logger.info(f"File saved successfully. Size: {file_size} bytes")
         
         # Create file record in database
         try:
@@ -80,26 +84,26 @@ async def upload_file(
             db.commit()
             db.refresh(db_file)
         except Exception as e:
-            print(f"Error creating file record: {e}")
+            logger.error(f"Error creating file record: {e}")
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
         
         # Process file content
         try:
-            print("Starting file content processing...")
+            logger.info("Starting file content processing...")
             chunker = Chunker()
             chunks_data = chunker.process_file(file_path, course_id, db_file.id)
             
-            print(f"File processing complete. Created {len(chunks_data)} chunks")
+            logger.info(f"File processing complete. Created {len(chunks_data)} chunks")
             
             if not chunks_data:
                 raise HTTPException(status_code=500, detail="Failed to process file content")
         except Exception as e:
-            print(f"Error processing file content: {e}")
+            logger.error(f"Error processing file content: {e}")
             raise HTTPException(status_code=500, detail=f"File processing error: {str(e)}")
         
         # Save chunks to database
         try:
-            print("Saving chunks to database...")
+            logger.info("Saving chunks to database...")
             chunks = []
             for chunk_data in chunks_data:
                 chunk = Chunk(
@@ -114,9 +118,9 @@ async def upload_file(
                 chunks.append(chunk)
             
             db.commit()
-            print(f"Successfully saved {len(chunks)} chunks to database")
+            logger.info(f"Successfully saved {len(chunks)} chunks to database")
         except Exception as e:
-            print(f"Error saving chunks: {e}")
+            logger.error(f"Error saving chunks: {e}")
             raise HTTPException(status_code=500, detail=f"Database error saving chunks: {str(e)}")
         
         # Generate embeddings for chunks
@@ -127,12 +131,12 @@ async def upload_file(
                     embedding = vector_store.create_embedding(chunk.content)
                     chunk.embedding_id = vector_store.store_embedding(embedding, chunk.id)
                 except Exception as e:
-                    print(f"Warning: Failed to generate embedding for chunk {chunk.id}: {e}")
+                    logger.warning(f"Failed to generate embedding for chunk {chunk.id}: {e}")
                     # Continue with other chunks even if one fails
             
             db.commit()
         except Exception as e:
-            print(f"Warning: Failed to initialize vector store: {e}")
+            logger.warning(f"Failed to initialize vector store: {e}")
             # Continue without embeddings if vector store fails
         
         # Generate AI-powered notes
@@ -169,13 +173,13 @@ async def upload_file(
             
             db.commit()
         except Exception as e:
-            print(f"Warning: Failed to generate notes: {e}")
+            logger.warning(f"Failed to generate notes: {e}")
             # Continue even if note generation fails
         
         # Get chunk statistics
         chunk_stats = chunker.get_chunk_statistics(chunks_data)
         
-        print(f"Upload complete. File ID: {db_file.id}, Chunks: {len(chunks)}, Notes: {len(structured_notes)}")
+        logger.info(f"Upload complete. File ID: {db_file.id}, Chunks: {len(chunks)}, Notes: {len(structured_notes)}")
         
         return {
             "message": "File uploaded and processed successfully",
@@ -196,7 +200,7 @@ async def upload_file(
         db.rollback()
         
         # Log the error for debugging
-        print(f"Error processing file {file.filename}: {str(e)}")
+        logger.error(f"Error processing file {file.filename}: {str(e)}")
         
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 

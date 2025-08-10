@@ -6,6 +6,10 @@ import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
 import os
+import logging
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 # Download required NLTK data
 try:
@@ -35,7 +39,7 @@ class Chunker:
                     if page_text.strip():
                         text += f"\n--- Page {page_num + 1} ---\n{page_text}\n"
         except Exception as e:
-            print(f"Error extracting text from PDF: {e}")
+            logger.error(f"Error extracting text from PDF: {e}")
             # Return a placeholder text if PDF extraction fails
             text = f"PDF content could not be extracted. Error: {e}"
         return text
@@ -49,7 +53,7 @@ class Chunker:
                 if paragraph.text.strip():
                     text += paragraph.text + "\n"
         except Exception as e:
-            print(f"Error extracting text from DOCX: {e}")
+            logger.error(f"Error extracting text from DOCX: {e}")
             # Return a placeholder text if DOCX extraction fails
             text = f"DOCX content could not be extracted. Error: {e}"
         return text
@@ -60,7 +64,7 @@ class Chunker:
             with open(file_path, 'r', encoding='utf-8') as file:
                 return file.read()
         except Exception as e:
-            print(f"Error reading TXT file: {e}")
+            logger.error(f"Error reading TXT file: {e}")
             return ""
     
     def extract_text(self, file_path: str) -> str:

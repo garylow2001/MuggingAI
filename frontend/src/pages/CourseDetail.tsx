@@ -27,15 +27,29 @@ export function CourseDetail() {
   const loadCourseData = async () => {
     try {
       setIsLoading(true);
-      const [courseData, filesData, notesData] = await Promise.all([
-        api.getCourse(parseInt(courseId!)),
-        api.getCourseFiles(parseInt(courseId!)),
-        api.getCourseNotes(parseInt(courseId!))
-      ]);
+      setError(''); // Clear any previous errors
       
+      // Load course data first (required)
+      const courseData = await api.getCourse(parseInt(courseId!));
       setCourse(courseData);
-      setFiles(filesData);
-      setNotes(notesData);
+      
+      // Load files and notes separately to handle empty states gracefully
+      try {
+        const filesData = await api.getCourseFiles(parseInt(courseId!));
+        setFiles(filesData);
+      } catch (filesErr) {
+        console.warn('Failed to load course files:', filesErr);
+        setFiles([]); // Set empty array if files fail to load
+      }
+      
+      try {
+        const notesData = await api.getCourseNotes(parseInt(courseId!));
+        setNotes(notesData);
+      } catch (notesErr) {
+        console.warn('Failed to load course notes:', notesErr);
+        setNotes([]); // Set empty array if notes fail to load
+      }
+      
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load course data');
     } finally {
