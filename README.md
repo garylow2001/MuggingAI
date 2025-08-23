@@ -14,12 +14,14 @@ Transform lengthy educational materials into digestible, interactive learning ex
 ## 🏗️ Architecture
 
 ### Frontend
+
 - **React** with **Vite** for fast development
 - **ShadCN UI** for beautiful, accessible components
 - **Zustand** for state management
 - **TanStack Query** for data fetching
 
 ### Backend
+
 - **FastAPI** for high-performance API
 - **OpenAI GPT-4** for content processing and quiz generation
 - **FAISS** for vector similarity search
@@ -29,11 +31,13 @@ Transform lengthy educational materials into digestible, interactive learning ex
 ## 🛠️ Setup
 
 ### Prerequisites
+
 - Python 3.9+
 - Node.js 18+
 - PostgreSQL (optional, SQLite for development)
 
 ### Backend Setup
+
 ```bash
 cd backend
 python -m venv venv
@@ -43,6 +47,7 @@ uvicorn main:app --reload
 ```
 
 ### Frontend Setup
+
 ```bash
 cd frontend
 npm install
@@ -78,13 +83,15 @@ mindcrush/
 Create `.env` files in both `backend/` and `frontend/` directories:
 
 ### Backend (.env)
+
 ```
-OPENAI_API_KEY=your_openai_api_key
+CEREBRAS_API_KEY=your_cerebras_api_key
 DATABASE_URL=postgresql://user:password@localhost/mindcrush
 SECRET_KEY=your_secret_key
 ```
 
 ### Frontend (.env)
+
 ```
 VITE_API_URL=http://localhost:8000
 ```
@@ -99,4 +106,4 @@ VITE_API_URL=http://localhost:8000
 
 ## 📝 License
 
-MIT License - see LICENSE file for details. 
+MIT License - see LICENSE file for details.

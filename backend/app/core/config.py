@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
 import os
+from openai import OpenAI
 
 class Settings(BaseSettings):
     # API Configuration
@@ -10,10 +11,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./mindcrush.db"
     
-    # OpenAI Configuration
-    openai_api_key: str = "your_openai_api_key_here"
-    openai_model: str = "gpt-4-turbo-preview"
-    embedding_model: str = "text-embedding-3-small"
+    # Cerebras Configuration
+    cerebras_api_key: str = os.environ.get("CEREBRAS_API_KEY", "no_api_key_provided")
+    cerebras_model: str = "llama3.1-8b"
     
     # Security
     secret_key: str = "your-secret-key-change-in-production"
@@ -39,6 +39,17 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# Cerebras client initialization using OpenAI-compatible API
+# def get_cerebras_client():
+#     api_key = os.environ.get("CEREBRAS_API_KEY", settings.cerebras_api_key)
+#     if api_key == "no_api_key_provided":
+#         raise RuntimeError("Cerebras API key not provided. Set CEREBRAS_API_KEY environment variable.")
+    
+#     return OpenAI(
+#         api_key=api_key,
+#         base_url="https://api.cerebras.ai/v1",
+#     )
+
 # Ensure upload directory exists
 os.makedirs(settings.uploads_dir, exist_ok=True)
-os.makedirs(settings.vector_store_path, exist_ok=True) 
+os.makedirs(settings.vector_store_path, exist_ok=True)

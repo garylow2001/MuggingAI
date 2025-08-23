@@ -6,7 +6,7 @@ import json
 
 class ModelContextProvider:
     def __init__(self):
-        self.client = openai.OpenAI(api_key=settings.openai_api_key)
+        self.client = openai.OpenAI(api_key=settings.cerebras_api_key)
         self.vector_store = VectorStore()
         
         # Prompt templates for different tasks

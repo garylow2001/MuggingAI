@@ -1,4 +1,4 @@
-import openai
+from cerebras.cloud.sdk import Cerebras
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
 import json
@@ -9,8 +9,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 class NoteGenerator:
-    def __init__(self):
-        self.client = openai.OpenAI(api_key=settings.openai_api_key)
+    def __init__(self, client=None):
+        self.client = client or Cerebras(api_key=settings.cerebras_api_key)
     
     def extract_topics_and_chapters(self, text: str) -> List[Dict[str, Any]]:
         """Extract topics and chapters from text using AI."""
@@ -38,17 +38,20 @@ class NoteGenerator:
             Focus on identifying clear chapter divisions and main topics within each chapter.
             """
             
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+            stream = self.client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": "You are an expert at analyzing educational content and extracting structured information."},
                     {"role": "user", "content": prompt}
                 ],
+                model=settings.cerebras_model,
+                stream=True,
+                max_completion_tokens=1000,
                 temperature=0.3,
-                max_tokens=1000
+                top_p=1
             )
-            
-            content = response.choices[0].message.content
+            content = ""
+            for chunk in stream:
+                content += chunk.choices[0].delta.content or ""
             # Extract JSON from response
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
@@ -124,17 +127,21 @@ class NoteGenerator:
             Format the notes in a clean, readable structure.
             """
             
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+            stream = self.client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": "You are an expert educator who creates clear, concise study notes."},
                     {"role": "user", "content": prompt}
                 ],
+                model=settings.cerebras_model,
+                stream=True,
+                max_completion_tokens=800,
                 temperature=0.4,
-                max_tokens=800
+                top_p=1
             )
-            
-            return response.choices[0].message.content
+            notes = ""
+            for chunk in stream:
+                notes += chunk.choices[0].delta.content or ""
+            return notes
             
         except Exception as e:
             logger.error(f"Error generating notes: {e}")

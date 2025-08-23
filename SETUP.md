@@ -42,7 +42,7 @@ pip install -r requirements.txt
 
 # Configure environment variables
 # Edit backend/.env and add your OpenAI API key:
-# OPENAI_API_KEY=your_actual_openai_api_key_here
+# CEREBRAS_API_KEY=your_cerebras_api_key
 
 # Run the backend
 uvicorn main:app --reload
@@ -70,7 +70,7 @@ The frontend will be available at `http://localhost:5173`
 
 ```env
 # Required: Your OpenAI API key
-OPENAI_API_KEY=sk-your-openai-api-key-here
+CEREBRAS_API_KEY=your_cerebras_api_key
 
 # Database (SQLite for development)
 DATABASE_URL=sqlite:///./mindcrush.db
@@ -123,6 +123,7 @@ mindcrush/
 ## API Endpoints
 
 ### Courses
+
 - `GET /api/courses` - List all courses
 - `POST /api/courses` - Create a new course
 - `GET /api/courses/{id}` - Get course details
@@ -130,21 +131,25 @@ mindcrush/
 - `DELETE /api/courses/{id}` - Delete course
 
 ### Files
+
 - `POST /api/files/upload` - Upload and process file
 - `GET /api/files/course/{courseId}` - Get files for course
 - `DELETE /api/files/{id}` - Delete file
 
 ### Chunks
+
 - `GET /api/chunks/course/{courseId}` - Get chunks for course
 - `GET /api/chunks/course/{courseId}/chapters` - Get chapters
 - `GET /api/chunks/course/{courseId}/search` - Search chunks
 
 ### Quizzes
+
 - `POST /api/quizzes/generate` - Generate MCQs
 - `GET /api/quizzes/course/{courseId}` - Get quizzes
 - `POST /api/quizzes/{id}/answer` - Answer quiz
 
 ### Chat
+
 - `POST /api/chat` - Chat with AI tutor
 - `GET /api/chat/sessions` - Get chat sessions
 - `POST /api/chat/summarize` - Generate summary
@@ -201,14 +206,17 @@ npm run lint
 ### Common Issues
 
 1. **OpenAI API Key Error**
+
    - Ensure your API key is valid and has sufficient credits
    - Check the key is correctly set in `backend/.env`
 
 2. **Database Issues**
+
    - Delete `mindcrush.db` and restart to reset database
    - Check SQLite is installed and accessible
 
 3. **File Upload Issues**
+
    - Ensure `uploads/` directory exists and is writable
    - Check file size limits in configuration
 
@@ -225,12 +233,14 @@ npm run lint
 ## Production Deployment
 
 ### Backend
+
 - Use PostgreSQL instead of SQLite
 - Set up proper environment variables
 - Use a production WSGI server like Gunicorn
 - Set up proper CORS configuration
 
 ### Frontend
+
 - Build with `npm run build`
 - Serve static files with nginx or similar
 - Configure API URL for production
@@ -245,4 +255,4 @@ npm run lint
 
 ## License
 
-MIT License - see LICENSE file for details. 
+MIT License - see LICENSE file for details.

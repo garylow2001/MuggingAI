@@ -1,27 +1,38 @@
+import os
+# Prevent tokenizers deadlock when running under uvicorn/pm forking
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import faiss
 import numpy as np
 import pickle
-import os
 from typing import List, Dict, Any, Optional
-import openai
 from app.core.config import settings
 import json
 import logging
+from sentence_transformers import SentenceTransformer
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
 class VectorStore:
-    def __init__(self):
-        self.client = openai.OpenAI(api_key=settings.openai_api_key)
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        # Initialize sentence transformer model
+        self.model = SentenceTransformer(model_name)
+        logger.info(
+            "Loaded sentence-transformers model: %s (dim=%d)",
+            model_name,
+            self.model.get_sentence_embedding_dimension(),
+        )
+
         self.index_path = os.path.join(settings.vector_store_path, "faiss_index.bin")
         self.metadata_path = os.path.join(settings.vector_store_path, "metadata.json")
-        
+
         # Initialize FAISS index
-        self.dimension = 1536  # OpenAI text-embedding-3-small dimension
+        self.dimension = self.model.get_sentence_embedding_dimension()  # Get dimension from the model
         self.index = None
-        self.metadata = []
-        
+        self.metadata: List[Dict[str, Any]] = []
+
         self._load_or_create_index()
     
     def _load_or_create_index(self):
@@ -29,12 +40,36 @@ class VectorStore:
         if os.path.exists(self.index_path) and os.path.exists(self.metadata_path):
             # Load existing index
             self.index = faiss.read_index(self.index_path)
+            # Verify index dimension matches model dimension
+            idx_dim = int(getattr(self.index, 'd', -1))
+            if idx_dim != self.dimension:
+                # If dimensions don't match, remove existing index/metadata and recreate to follow current model
+                logger.info("FAISS index dimension (%s) does not match model dimension (%s). Removing old index and recreating to match model.", idx_dim, self.dimension)
+                if os.path.exists(self.index_path):
+                    os.remove(self.index_path)
+                if os.path.exists(self.metadata_path):
+                    os.remove(self.metadata_path)
+                logger.info("Removed old FAISS index and metadata files")
+                # Recreate empty index and metadata
+                self.index = faiss.IndexFlatIP(self.dimension)
+                self.metadata = []
+                return
             with open(self.metadata_path, 'r') as f:
                 self.metadata = json.load(f)
         else:
             # Create new index
             self.index = faiss.IndexFlatIP(self.dimension)  # Inner product for cosine similarity
             self.metadata = []
+
+    def _ensure_index(self):
+        """Ensure the FAISS index exists and matches the configured dimension."""
+        if self.index is None:
+            self.index = faiss.IndexFlatIP(self.dimension)
+            return
+        idx_dim = int(getattr(self.index, 'd', -1))
+        if idx_dim != self.dimension:
+            logger.warning("FAISS index dim mismatch at runtime (index=%s, model=%s). Recreating index.", idx_dim, self.dimension)
+            self.index = faiss.IndexFlatIP(self.dimension)
     
     def _save_index(self):
         """Save the FAISS index and metadata."""
@@ -44,34 +79,67 @@ class VectorStore:
             json.dump(self.metadata, f)
     
     async def get_embedding(self, text: str) -> List[float]:
-        """Get embedding for a text using OpenAI."""
-        response = await self.client.embeddings.create(
-            model=settings.embedding_model,
-            input=text
-        )
-        return response.data[0].embedding
+        """Async wrapper for create_embedding."""
+        return self.create_embedding(text)
     
     def create_embedding(self, text: str) -> List[float]:
-        """Synchronous wrapper for get_embedding."""
-        try:
-            response = self.client.embeddings.create(
-                model=settings.embedding_model,
-                input=text
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.error(f"Error creating embedding: {e}")
-            # Return a dummy embedding if OpenAI fails
-            return [0.0] * self.dimension
+        """Create embedding using sentence-transformers model."""
+        if not text:
+            raise ValueError("Text for embedding must be non-empty")
+
+        # Batch encode to get consistent numpy output
+        emb_batch = self.model.encode([text], convert_to_numpy=True, show_progress_bar=False)
+        emb = np.asarray(emb_batch[0], dtype=np.float32)
+
+        # Ensure correct dimensionality
+        if emb.shape[0] != self.dimension:
+            # If different, resize or pad/truncate safely
+            if emb.shape[0] > self.dimension:
+                emb = emb[: self.dimension]
+            else:
+                padded = np.zeros(self.dimension, dtype=np.float32)
+                padded[: emb.shape[0]] = emb
+                emb = padded
+
+        # Normalize for cosine similarity when using IndexFlatIP
+        norm = np.linalg.norm(emb)
+        if norm > 0:
+            emb = emb / norm
+
+        return emb.tolist()
+
+    def _ensure_embedding(self, embedding: List[float]) -> np.ndarray:
+        """Validate, pad/truncate, normalize and return numpy array of shape (dimension,)"""
+        arr = np.asarray(embedding, dtype=np.float32).reshape(-1)
+
+        if arr.shape[0] != self.dimension:
+            if arr.shape[0] > self.dimension:
+                arr = arr[: self.dimension]
+            else:
+                padded = np.zeros(self.dimension, dtype=np.float32)
+                padded[: arr.shape[0]] = arr
+                arr = padded
+
+        # normalize for IndexFlatIP (cosine similarity)
+        norm = np.linalg.norm(arr)
+        if norm > 0:
+            arr = arr / norm
+
+        return arr
     
     def store_embedding(self, embedding: List[float], chunk_id: int) -> str:
         """Store a single embedding and return its ID."""
-        # Convert to numpy array
-        embedding_array = np.array([embedding], dtype=np.float32)
-        
+        # Ensure FAISS index exists
+        if self.index is None:
+            self.index = faiss.IndexFlatIP(self.dimension)
+
+        # Validate and prepare embedding
+        arr = self._ensure_embedding(embedding)
+        embedding_array = np.asarray([arr], dtype=np.float32)
+
         # Add to FAISS index
         self.index.add(embedding_array)
-        
+
         # Create metadata entry
         chunk_id_str = f"chunk_{len(self.metadata)}"
         metadata_entry = {
@@ -86,10 +154,10 @@ class VectorStore:
             "chunk_id": chunk_id  # Reference to the database chunk
         }
         self.metadata.append(metadata_entry)
-        
+
         # Save index
         self._save_index()
-        
+
         return chunk_id_str
     
     async def add_chunks(self, chunks: List[Dict[str, Any]]) -> List[str]:
@@ -101,15 +169,23 @@ class VectorStore:
         texts = [chunk['content'] for chunk in chunks]
         embeddings = []
         
-        for text in texts:
+        for i, text in enumerate(texts):
             embedding = await self.get_embedding(text)
+            # Basic validation: embedding should be list/array of correct length
+            if not embedding or len(embedding) != self.dimension:
+                raise ValueError(f"Invalid embedding for chunk {i}: length={len(embedding) if embedding else 0}")
             embeddings.append(embedding)
         
-        # Convert to numpy array
-        embeddings_array = np.array(embeddings, dtype=np.float32)
-        
-        # Add to FAISS index
-        self.index.add(embeddings_array)
+        # Convert to numpy array (ensure each embedding is correct size)
+        prepared = []
+        for emb in embeddings:
+            prepared.append(self._ensure_embedding(emb))
+        if prepared:
+            embeddings_array = np.vstack(prepared).astype(np.float32)
+            # Ensure FAISS index exists
+            if self.index is None:
+                self.index = faiss.IndexFlatIP(self.dimension)
+            self.index.add(embeddings_array)
         
         # Add metadata
         chunk_ids = []
