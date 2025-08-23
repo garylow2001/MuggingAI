@@ -1,9 +1,11 @@
+import json
 import os
 import shutil
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.models.database import get_db, Course, File as FileModel, Chunk, Topic, Note
+import json
 from app.services.chunker import Chunker
 from app.services.note_generator import NoteGenerator
 from app.services.vector_store import VectorStore
@@ -102,6 +104,8 @@ async def upload_file(
     # Generate AI-powered notes
     note_generator = NoteGenerator()
     structured_notes = note_generator.process_course_content(chunks_data)
+    logger.info(f"Generated {len(structured_notes)} structured notes")
+    logger.info(f"Structured notes content:\n{json.dumps(structured_notes, ensure_ascii=False, indent=2)}")
 
     # Save topics and notes to database
     for note_data in structured_notes:
@@ -121,9 +125,20 @@ async def upload_file(
             db.commit()
             db.refresh(topic)
         
+        # Normalize note content to string for DB storage (avoid list/dict binding errors)
+        raw_content = note_data.get('notes_content', '')
+        if isinstance(raw_content, list):
+            note_content = '\n'.join(map(str, raw_content))
+        elif isinstance(raw_content, dict):
+            note_content = json.dumps(raw_content, ensure_ascii=False)
+        elif raw_content is None:
+            note_content = ''
+        else:
+            note_content = str(raw_content)
+
         # Create note
         note = Note(
-            content=note_data['notes_content'],
+            content=note_content,
             topic_id=topic.id,
             course_id=course_id
         )
