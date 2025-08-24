@@ -19,6 +19,10 @@ class NoteGenerator:
     def __init__(self, client: Optional[Cerebras] = None):
         # Lazy client: do not create the Cerebras client at import time to avoid warmup requests
         self._client = client
+        self._extraction_temperature = 0.2
+        self._extraction_top_p = 0.8
+        self._note_generation_temperature = 0.2
+        self._note_generation_top_p = 0.8
 
     def _get_client(self) -> Cerebras:
         if self._client is None:
@@ -147,21 +151,6 @@ class NoteGenerator:
     def _build_batch_notes_prompt(self, chapter_title: str, topics: List[Dict[str, Any]], chapter_summary: str, topic_snippets: Dict[str, str] | None = None) -> str:
         return BatchNoteGenerationPrompt(chapter_title, topics, chapter_summary, topic_snippets)
 
-    # Public methods
-    def extract_topics_and_chapters(self, text: str) -> Dict[str, Any]:
-        # Pre-summarize long text
-        summary = self._summarize_text(text, max_chars=6000)
-        prompt = self._build_extraction_prompt(summary)
-        logger.info("Prepared extraction prompt (len=%d) — LLM call commented out", len(prompt))
-        logger.debug("Extraction prompt:\n%s", prompt)
-
-        # LLM call commented out for testing
-        # client = self._get_client()
-        # resp = client.chat.completions.create(...)
-
-        # Use fallback extractor so downstream note generation proceeds (keeps behavior safe)
-        return self._create_fallback_structure(summary)
-
     def _create_fallback_structure(self, text: str) -> Dict[str, Any]:
         lines = text.split('\n')
         chapters = []
@@ -248,8 +237,8 @@ class NoteGenerator:
                     model=getattr(settings, 'cerebras_model', None),
                     stream=False,
                     max_completion_tokens=65536,
-                    temperature=1,
-                    top_p=1,
+                    temperature=self._extraction_temperature,
+                    top_p=self._extraction_top_p,
                 )
 
                 # Log LLM extraction call (prompt + raw response + extracted text)
@@ -328,11 +317,11 @@ class NoteGenerator:
                     client = self._get_client()
                     resp2 = client.chat.completions.create(
                         messages=[{"role": "user", "content": batch_prompt}],
-                        model=getattr(settings, 'cerebras_model', None),
+                        model=getattr(settings, 'cerebras_model', "gpt-oss-120b"),
                         stream=False,
                         max_completion_tokens=65536,
-                        temperature=1,
-                        top_p=1,
+                        temperature=self._note_generation_temperature,
+                        top_p=self._note_generation_top_p,
                     )
 
                     # Log LLM batch-notes call
@@ -409,6 +398,20 @@ class NoteGenerator:
 
         logger.info("Finished generating notes; total=%d", len(structured_notes))
         return structured_notes
+    
+    def extract_topics_and_chapters_for_logging(self, text: str) -> Dict[str, Any]:
+        # Pre-summarize long text
+        summary = self._summarize_text(text, max_chars=6000)
+        prompt = self._build_extraction_prompt(summary)
+        logger.info("Prepared extraction prompt (len=%d) — LLM call commented out", len(prompt))
+        logger.debug("Extraction prompt:\n%s", prompt)
+
+        # LLM call commented out for testing
+        # client = self._get_client()
+        # resp = client.chat.completions.create(...)
+
+        # Use fallback extractor so downstream note generation proceeds (keeps behavior safe)
+        return self._create_fallback_structure(summary)
 
     def log_prompts(self, chunks: List[Dict[str, Any]]) -> None:
         """Build and log extraction & batch-note prompts for the provided chunks.
@@ -437,7 +440,7 @@ class NoteGenerator:
             logger.debug("[PROMPT][extraction] for chapter '%s':\n%s", chapter_title, extraction_prompt)
 
             # Use extractor (LLM disabled) to get the structure
-            extractor_result = self.extract_topics_and_chapters(chapter_summary)
+            extractor_result = self.extract_topics_and_chapters_for_logging(chapter_summary)
             extracted_chapters = extractor_result.get('chapters', []) if isinstance(extractor_result, dict) else []
 
             for ex in extracted_chapters:
