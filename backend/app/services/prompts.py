@@ -84,7 +84,7 @@ def BatchNoteGenerationPrompt(chapter_title: str, topics: List[Dict[str, Any]], 
         + TOPIC_DEFINITION + "\n"
         f"NOTE GENERATION INSTRUCTIONS:\n"
         f"1. For each topic, create a JSON object with 'title' and 'notes' fields\n"
-        f"2. The 'notes' field should contain 5-8 detailed bullet points (newline-separated)\n"
+        f"2. The 'notes' field should contain 5-8 detailed bullet points as an array of strings\n"
         f"3. Each bullet point should be comprehensive and informative\n" 
         f"4. Include examples, definitions, and practical applications in your notes\n"
         f"5. If topics are similar, merge them and create combined, thorough notes\n"
@@ -95,6 +95,10 @@ def BatchNoteGenerationPrompt(chapter_title: str, topics: List[Dict[str, Any]], 
         f"3. Use the 'Relevant context' provided for each topic to tailor your notes\n"
         f"4. Focus on topic-specific information rather than generic information\n"
         f"5. Include concrete examples and practical applications specific to each topic\n\n"
+        f"FORMAT REQUIREMENTS:\n"
+        f"1. IMPORTANT: Return ONLY a flat JSON array of topic objects, not a nested structure\n"
+        f"2. Format: [{{'title': 'Topic Name', 'notes': ['Point 1', 'Point 2', ...]}}]\n"
+        f"3. Do NOT wrap the response in {{'chapters': [...]}}\n\n"
     )
 
     # Only include a brief chapter overview to save context space

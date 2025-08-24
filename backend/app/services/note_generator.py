@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 import uuid
-from app.services.prompts import TopicExtractionPrompt, BatchNoteGenerationPrompt
+from app.services.prompts import TopicExtractionPrompt, BatchNoteGenerationPrompt, clean_formatting
 
 
 # Get logger for this module
@@ -58,15 +58,44 @@ class NoteGenerator:
             # Normalize to string and strip surrounding whitespace
             text = str(content).strip()
 
-            # If the model wrapped JSON in a fenced block (```json ... ``` or ``` ... ```), extract inner text
-            m = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL | re.IGNORECASE)
-            if m:
-                inner = m.group(1).strip()
-                if not inner:
-                    raise ValueError('fenced block present but empty')
-                return inner
-
-            # No fence detected — return the trimmed content as-is
+            # More robust handling of multiple code block formats
+            patterns = [
+                r"```(?:json)\s*(.*?)\s*```",  # ```json ... ```
+                r"```\s*([\{|\[].*?[\}|\]])\s*```",  # ``` {json} ``` or ``` [json] ```
+                r"```(?:python|javascript|js)\s*({[\s\S]*?})\s*```",  # ```python/js/javascript {...} ```
+                r"```\s*(.*?)\s*```",  # Any code block
+            ]
+            
+            # Try to find and extract JSON from code blocks
+            for pattern in patterns:
+                m = re.search(pattern, text, flags=re.DOTALL | re.IGNORECASE)
+                if m:
+                    inner = m.group(1).strip()
+                    if not inner:
+                        continue  # Try next pattern if empty
+                    
+                    # Additional cleaning for potential JSON formatting issues
+                    if inner.startswith('{') or inner.startswith('['):
+                        # Remove any markdown formatting that might have been included
+                        inner = re.sub(r'^\s*```.*?\n', '', inner)
+                        inner = re.sub(r'\n\s*```\s*$', '', inner)
+                        
+                        # Log the extracted JSON for debugging
+                        logger.debug("Extracted JSON from code block: %s", inner[:200])
+                        return inner
+            
+            # If it looks like JSON but wasn't in a code block
+            if (text.strip().startswith('{') and text.strip().endswith('}')) or \
+               (text.strip().startswith('[') and text.strip().endswith(']')):
+                logger.info("Found raw JSON without code block")
+                return text.strip()
+                
+            # If no JSON or code block detected, return the trimmed content as-is
+            # Clean any triple backticks at the beginning or end without content between them
+            text = re.sub(r'^```.*?\n', '', text)
+            text = re.sub(r'\n```\s*$', '', text)
+            
+            logger.debug("No code block or direct JSON found, returning raw text")
             return text
         except Exception as e:
             # propagate as ValueError so callers can detect and fail fast
@@ -225,24 +254,44 @@ class NoteGenerator:
         return {'chapters': chapters}
 
     def generate_notes_for_topic(self, topic_title: str, topic_description: str, content: str) -> str:
+        # Clean the content first to remove formatting artifacts
+        cleaned_content = clean_formatting(content)
+        
         # Build focused prompt and log it; LLM call is commented out
-        trimmed = self._summarize_text(content, max_chars=3000)
+        trimmed = self._summarize_text(cleaned_content, max_chars=3000)
         prompt = (f"Generate concise study notes for the topic '{topic_title}'.\nDescription: {topic_description}\n"
                   f"Context:\n{trimmed}\n\nReturn readable bullet-point notes.")
         logger.info("Prepared notes prompt for topic '%s' (len=%d) — LLM call commented out", topic_title, len(prompt))
         logger.debug("Notes prompt for topic '%s':\n%s", topic_title, prompt)
 
-        # LLM invocation is commented out for testing; return extractive fallback
-        sentences = re.split(r'(?<=[\.!?])\s+', content)
+        # If the content is very messy or unformatted, create a better fallback
+        if "--- Page" in content or "\n" in content[:50]:
+            # This appears to be raw lecture content - provide a cleaner fallback
+            return (f"# {topic_title}\n\n"
+                    f"*This topic requires additional processing. Please regenerate notes for better content.*\n\n"
+                    f"## Summary\n{topic_description}\n\n"
+                    f"## Key Points\n- Important information about {topic_title}\n- Check source material for details")
+        
+        # LLM invocation is commented out for testing; return extractive fallback with improved cleaning
+        sentences = re.split(r'(?<=[\.!?])\s+', cleaned_content)
         bullets = []
         for s in sentences:
             s = s.strip()
-            if not s:
+            if not s or len(s) < 10:  # Skip very short snippets
+                continue
+            # Skip sentences with page markers or formatting artifacts
+            if "Page" in s or "---" in s or "[ CS" in s:
                 continue
             bullets.append(f"- {s}")
             if len(bullets) >= 8:
                 break
-        return '\n'.join(bullets) if bullets else content[:800]
+                
+        if not bullets:
+            return (f"# {topic_title}\n\n"
+                   f"*Automated notes for this topic could not be generated.*\n\n"
+                   f"## Description\n{topic_description}")
+                   
+        return '\n'.join(bullets)
 
     def process_course_content(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         logger.info("Processing %d chunks into notes (batched per chapter)", len(chunks))
@@ -334,7 +383,7 @@ class NoteGenerator:
             for ex in extracted_chapters:
                 ex_title = ex.get('title') or chapter_title
                 topics = ex.get('topics') or [{'title': ex_title, 'description': ''}]
-
+                
                 # Build topic -> supporting snippets map using improved retrieval method
                 topic_snippets: Dict[str, str] = {}
                 for topic in topics:
@@ -352,9 +401,18 @@ class NoteGenerator:
                     # If we couldn't find any relevant snippets, fallback to the first few chunks
                     if not relevant_snippets:
                         relevant_snippets = [c.get('content', '') for c in chapter_chunks[:3]]
+                    
+                    # Clean each snippet before combining them
+                    cleaned_snippets = [clean_formatting(snippet) for snippet in relevant_snippets]
+                    
+                    # Remove any snippets that are still obviously raw lecture content with page markers
+                    cleaned_snippets = [s for s in cleaned_snippets if not ("--- Page" in s or "[ CS" in s)]
+                    
+                    if not cleaned_snippets:
+                        cleaned_snippets = ["No clean content found for this topic."]
                         
                     # Summarize the combined snippets to fit within character limit
-                    topic_snippets[t_title] = self._summarize_text(' '.join(relevant_snippets), max_chars=2000)
+                    topic_snippets[t_title] = self._summarize_text(' '.join(cleaned_snippets), max_chars=2000)
 
                 # Build the batch prompt and log
                 batch_prompt = self._build_batch_notes_prompt(ex_title, topics, chapter_summary, topic_snippets)
@@ -401,8 +459,30 @@ class NoteGenerator:
                     logger.debug("[LLM RESPONSE][batch_notes] %s", text2)
 
                     notes_json = json.loads(text2)
+                    
+                    # Handle both direct array and nested chapter->topics structure
+                    if isinstance(notes_json, list):
+                        # Direct array format - keep as is
+                        pass
+                    elif isinstance(notes_json, dict) and "chapters" in notes_json:
+                        # Nested chapter format - extract topics
+                        chapters = notes_json.get("chapters", [])
+                        if chapters and isinstance(chapters, list) and len(chapters) > 0:
+                            chapter = chapters[0]
+                            if isinstance(chapter, dict) and "topics" in chapter:
+                                notes_json = chapter.get("topics", [])
+                                logger.info("Extracted topics from nested chapter structure: %d topics", len(notes_json))
+                            else:
+                                logger.error("Invalid chapter structure: %s", json.dumps(chapter, default=str)[:200])
+                                raise ValueError('Batch notes response has invalid chapter structure')
+                        else:
+                            logger.error("Invalid chapters array: %s", json.dumps(chapters, default=str)[:200])
+                            raise ValueError('Batch notes response has invalid chapters array')
+                    else:
+                        raise ValueError('Batch notes response is not a valid JSON structure')
+                        
                     if not isinstance(notes_json, list):
-                        raise ValueError('Batch notes response is not a JSON array')
+                        raise ValueError('Processed batch notes is not a JSON array')
                 except Exception as e:
                     logger.exception("Batch notes LLM call failed or produced invalid JSON: %s", e)
                     notes_json = None
@@ -411,40 +491,119 @@ class NoteGenerator:
                 if notes_json:
                     for item in notes_json:
                         title = item.get('title')
+                        if not title:
+                            logger.warning("Note item missing title, skipping: %s", json.dumps(item, default=str)[:200])
+                            continue
+                            
+                        # Get notes content from 'notes' key (preferred) or 'notes_content' key
                         notes_text = item.get('notes') or item.get('notes_content') or ''
-
-                        # Normalize notes_text to a string for DB storage
+                        
+                        # For list items, format as proper bullet points
                         try:
                             if isinstance(notes_text, list):
-                                notes_text = '\n'.join(map(str, notes_text))
+                                # Format bullet points consistently
+                                notes_text = '\n'.join([f"- {str(point).strip('- ')}" for point in notes_text])
                             elif isinstance(notes_text, dict):
                                 # convert dicts to compact JSON
                                 notes_text = json.dumps(notes_text, ensure_ascii=False)
                             elif not isinstance(notes_text, str):
                                 notes_text = str(notes_text)
-                        except Exception:
+                        except Exception as e:
+                            logger.exception("Error formatting notes text: %s", e)
                             notes_text = str(notes_text)
 
                         logger.info("Created note for topic '%s' (chapter '%s') from LLM", title, ex_title)
+                        
+                        # Store notes content with both 'notes' and 'notes_content' keys for consistency
                         structured_notes.append({
                             'chapter_title': ex_title,
                             'topic_title': title,
                             'topic_description': next((t.get('description','') for t in topics if t.get('title')==title), ''),
                             'notes_content': notes_text,
+                            'notes': notes_text,  # Add this for consistency with LLM responses
                             'chunks': chapter_chunks
                         })
                 else:
+                    # Use a more robust fallback when batch generation fails
+                    logger.warning("Using fallback note generation for all topics in chapter '%s'", ex_title)
+                    
+                    # Try to use sentence-transformers for better content matching if available
+                    try:
+                        from sentence_transformers import SentenceTransformer
+                        model = SentenceTransformer('all-MiniLM-L6-v2')
+                        logger.info("Using sentence-transformers for enhanced fallback note generation")
+                        has_embeddings = True
+                    except ImportError:
+                        logger.info("sentence-transformers not available, using basic fallback")
+                        has_embeddings = False
+                    
+                    # Use the LLM response directly even when it's in a nested format
+                    logger.error("Attempting to recover from JSON format issues for chapter '%s'", ex_title)
+                    
+                    # Try parsing the text directly to see if we can recover
+                    try:
+                        # Try to extract the raw text and parse it directly
+                        if hasattr(note_generation_resp, 'choices') and len(note_generation_resp.choices) > 0:
+                            raw_content = note_generation_resp.choices[0].message.content
+                            logger.info("Attempting direct extraction from raw content (len=%d)", len(raw_content))
+                            
+                            # Look for JSON-like content
+                            matches = re.findall(r'```(?:json)?\s*(.*?)\s*```', raw_content, re.DOTALL)
+                            if matches:
+                                # Try to parse the first match
+                                potential_json = matches[0]
+                                parsed = json.loads(potential_json)
+                                
+                                # Handle nested or flat format
+                                if isinstance(parsed, dict) and "chapters" in parsed:
+                                    chapters = parsed.get("chapters", [])
+                                    if chapters and len(chapters) > 0:
+                                        chapter = chapters[0]
+                                        topics_list = chapter.get("topics", [])
+                                        if topics_list:
+                                            logger.info("Successfully recovered %d topics from nested JSON", len(topics_list))
+                                            notes_json = topics_list
+                                elif isinstance(parsed, list):
+                                    notes_json = parsed
+                                    logger.info("Successfully recovered %d topics from direct JSON array", len(notes_json))
+                            
+                            if notes_json:
+                                # Process the recovered notes
+                                for item in notes_json:
+                                    title = item.get('title')
+                                    notes_text = item.get('notes') or item.get('notes_content') or ''
+                                    
+                                    # Format notes text properly
+                                    if isinstance(notes_text, list):
+                                        notes_text = '\n'.join([f"- {str(point).strip('- ')}" for point in notes_text])
+                                    
+                                    structured_notes.append({
+                                        'chapter_title': ex_title,
+                                        'topic_title': title,
+                                        'topic_description': next((t.get('description','') for t in topics if t.get('title')==title), ''),
+                                        'notes_content': notes_text,
+                                        'notes': notes_text,
+                                        'chunks': chapter_chunks
+                                    })
+                                
+                                # Skip the error reporting if we recovered successfully
+                                continue
+                    except Exception as recovery_error:
+                        logger.exception("Recovery attempt failed: %s", recovery_error)
+                    
+                    # If we reach here, recovery failed - log the error and add placeholder content
+                    logger.error("Note generation failed for chapter '%s' and recovery failed", ex_title)
                     for topic in topics:
                         t_title = topic.get('title')
-                        t_desc = topic.get('description', '')
-                        context = topic_snippets.get(t_title, '')
-                        notes_text = self.generate_notes_for_topic(t_title, t_desc, context)
-                        logger.info("Created note for topic '%s' (chapter '%s') [fallback]", t_title, ex_title)
+                        logger.error("- Topic without notes: %s", t_title)
+                        
+                        # Add placeholder indicating failure but with more helpful message
                         structured_notes.append({
                             'chapter_title': ex_title,
                             'topic_title': t_title,
-                            'topic_description': t_desc,
-                            'notes_content': notes_text,
+                            'topic_description': topic.get('description', ''),
+                            'notes_content': f"The system encountered a problem generating notes for '{t_title}'. The topic was extracted successfully, but the note generation process had an error. Please try regenerating notes for this topic.",
+                            'notes': f"The system encountered a problem generating notes for '{t_title}'. The topic was extracted successfully, but the note generation process had an error. Please try regenerating notes for this topic.",
                             'chunks': chapter_chunks
                         })
 

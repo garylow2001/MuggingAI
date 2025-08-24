@@ -1,11 +1,11 @@
 import json
 import os
+import re
 import shutil
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.models.database import get_db, Course, File as FileModel, Chunk, Topic, Note
-import json
 from app.services.chunker import Chunker
 from app.services.note_generator import NoteGenerator
 from app.services.vector_store import VectorStore
@@ -126,15 +126,35 @@ async def upload_file(
             db.refresh(topic)
         
         # Normalize note content to string for DB storage (avoid list/dict binding errors)
-        raw_content = note_data.get('notes_content', '')
+        # Check for both 'notes_content' and 'notes' keys to handle different response formats
+        raw_content = note_data.get('notes_content', note_data.get('notes', ''))
+        
+        # If it's a list, format as bullet points
         if isinstance(raw_content, list):
-            note_content = '\n'.join(map(str, raw_content))
+            # Make sure each item starts with a bullet
+            note_content = '\n'.join([
+                f"- {str(item).strip('- ')}" for item in raw_content
+            ])
         elif isinstance(raw_content, dict):
-            note_content = json.dumps(raw_content, ensure_ascii=False)
+            # Convert dict to formatted JSON
+            note_content = json.dumps(raw_content, ensure_ascii=False, indent=2)
         elif raw_content is None:
+            # Empty string for None values
             note_content = ''
         else:
-            note_content = str(raw_content)
+            # Convert to string and ensure proper bullet point formatting
+            content_str = str(raw_content)
+            
+            # If content already has bullet points, keep them as is
+            if re.search(r'^\s*[-•*]\s', content_str, re.MULTILINE):
+                note_content = content_str
+            else:
+                # Convert text with newlines to bullet points if not already formatted
+                lines = content_str.strip().split('\n')
+                note_content = '\n'.join([f"- {line.strip('- ')}" for line in lines if line.strip()])
+                
+        # Log what we're saving
+        logger.info(f"Saving note content for topic '{note_data['topic_title']}', content starts with: {note_content[:50]}...")
 
         # Create note
         note = Note(
