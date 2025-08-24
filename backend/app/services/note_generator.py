@@ -31,44 +31,46 @@ class NoteGenerator:
 
     # Helpers
     def _extract_text_from_response(self, resp: Any) -> Optional[str]:
-        """Try several common response shapes from the Cerebras SDK to extract the text content."""
+        """Extract text from the expected SDK response shape.
+
+        This function only accepts the canonical shape: resp.choices[0].message.content
+        and will raise a ValueError if the response does not conform. This makes
+        upstream failures explicit instead of silently trying other shapes.
+        Also extracts out the content from the json response that is wrapped in a fenced block.
+        """
+        if resp is None:
+            raise ValueError('LLM response is None')
+
+        # Expect the SDK response object where choices[0].message.content exists
         try:
-            if resp is None:
-                return None
-            # direct attribute
-            if hasattr(resp, 'text') and resp.text:
-                return resp.text
+            if not hasattr(resp, 'choices'):
+                raise ValueError('LLM response missing "choices" attribute')
+            choices = resp.choices
+            if not isinstance(choices, (list, tuple)) or len(choices) == 0:
+                raise ValueError('LLM response has no choices')
+            first = choices[0]
+            if not hasattr(first, 'message') or not hasattr(first.message, 'content'):
+                raise ValueError('LLM response choices[0] missing message.content')
+            content = first.message.content
+            if content is None:
+                raise ValueError('LLM response message.content is None')
 
-            # choices -> message -> content
-            choices = None
-            if hasattr(resp, 'choices'):
-                choices = resp.choices
-            elif isinstance(resp, dict):
-                choices = resp.get('choices')
+            # Normalize to string and strip surrounding whitespace
+            text = str(content).strip()
 
-            if choices:
-                # try multiple shapes
-                first = choices[0]
-                # object with .message.content
-                if hasattr(first, 'message') and getattr(first.message, 'content', None):
-                    return first.message.content
-                # dict shape
-                if isinstance(first, dict):
-                    msg = first.get('message')
-                    if isinstance(msg, dict) and msg.get('content'):
-                        return msg.get('content')
-                    # delta/content (streaming)
-                    delta = first.get('delta')
-                    if isinstance(delta, dict) and delta.get('content'):
-                        return delta.get('content')
-                    # old text field
-                    if first.get('text'):
-                        return first.get('text')
+            # If the model wrapped JSON in a fenced block (```json ... ``` or ``` ... ```), extract inner text
+            m = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+            if m:
+                inner = m.group(1).strip()
+                if not inner:
+                    raise ValueError('fenced block present but empty')
+                return inner
 
-            # fallback to str()
-            return str(resp)
-        except Exception:
-            return None
+            # No fence detected — return the trimmed content as-is
+            return text
+        except Exception as e:
+            # propagate as ValueError so callers can detect and fail fast
+            raise
 
     def _normalize_chapter_title(self, title: Optional[str]) -> str:
         if not title:
@@ -151,6 +153,49 @@ class NoteGenerator:
     def _build_batch_notes_prompt(self, chapter_title: str, topics: List[Dict[str, Any]], chapter_summary: str, topic_snippets: Dict[str, str] | None = None) -> str:
         return BatchNoteGenerationPrompt(chapter_title, topics, chapter_summary, topic_snippets)
 
+    def _find_relevant_snippets(self, topic_title: str, topic_desc: str, chunks: List[Dict[str, Any]], max_snippets: int = 5) -> List[str]:
+        """Find content chunks that are most relevant to a given topic based on keyword matching.
+        
+        Args:
+            topic_title: Title of the topic
+            topic_desc: Description of the topic
+            chunks: List of content chunks
+            max_snippets: Maximum number of snippets to return
+            
+        Returns:
+            List of relevant content snippets
+        """
+        # Create keywords from title and description
+        # Extract words of at least 3 characters to use as keywords
+        keywords = re.findall(r'\b\w{3,}\b', (topic_title + " " + topic_desc).lower())
+        keywords = [k for k in keywords if k not in {'and', 'the', 'for', 'with', 'that', 'this', 'from', 'what', 'when', 'where', 'who', 'how', 'why'}]
+        
+        # Score chunks by keyword matches
+        scored_chunks = []
+        for chunk in chunks:
+            content = chunk.get('content', '').lower()
+            # Base score: how many keywords appear in this chunk
+            score = sum(1 for k in keywords if k in content)
+            
+            # Bonus points for title words (more significant)
+            title_words = re.findall(r'\b\w{3,}\b', topic_title.lower())
+            title_bonus = sum(3 for w in title_words if w in content and len(w) > 3)
+            
+            total_score = score + title_bonus
+            if total_score > 0:
+                scored_chunks.append((total_score, chunk.get('content', '')))
+        
+        # Sort by score (descending) and take top chunks
+        scored_chunks.sort(reverse=True)
+        result = [c for _, c in scored_chunks[:max_snippets]]
+        
+        # If we don't have enough relevant chunks, add the first few chunks as fallback
+        if len(result) < 2:
+            fallback = [c.get('content', '') for c in chunks[:3] if c.get('content') not in result]
+            result.extend(fallback[:3 - len(result)])
+            
+        return result
+
     def _create_fallback_structure(self, text: str) -> Dict[str, Any]:
         lines = text.split('\n')
         chapters = []
@@ -232,7 +277,7 @@ class NoteGenerator:
                 logger.info("Sending extraction prompt to LLM for chapter '%s' (len=%d)", chapter_title, len(extraction_prompt))
                 logger.debug("[LLM REQUEST][extraction] %s", extraction_prompt)
                 client = self._get_client()
-                resp = client.chat.completions.create(
+                extract_topic_resp = client.chat.completions.create(
                     messages=[{"role": "user", "content": extraction_prompt}],
                     model=getattr(settings, 'cerebras_model', None),
                     stream=False,
@@ -244,22 +289,22 @@ class NoteGenerator:
                 # Log LLM extraction call (prompt + raw response + extracted text)
                 call_idx += 1
                 try:
-                    self._log_llm_call(llm_log, call_idx, 'extraction', extraction_prompt, resp)
+                    self._log_llm_call(llm_log, call_idx, 'extraction', extraction_prompt, extract_topic_resp)
                 except Exception:
                     logger.exception("Failed to record extraction LLM call to log")
 
                 # Log raw response shape for debugging
                 try:
-                    logger.debug("[LLM RAW RESPONSE][extraction] type=%s repr=%r", type(resp), resp)
-                    if isinstance(resp, dict):
-                        logger.debug("[LLM RAW RESPONSE][extraction][dict] %s", json.dumps(resp, default=str)[:10000])
-                    elif hasattr(resp, '__dict__'):
-                        logger.debug("[LLM RAW RESPONSE][extraction].__dict__ keys=%s", list(getattr(resp, '__dict__', {}).keys()))
+                    logger.debug("[LLM RAW RESPONSE][extraction] type=%s repr=%r", type(extract_topic_resp), extract_topic_resp)
+                    if isinstance(extract_topic_resp, dict):
+                        logger.debug("[LLM RAW RESPONSE][extraction][dict] %s", json.dumps(extract_topic_resp, default=str)[:10000])
+                    elif hasattr(extract_topic_resp, '__dict__'):
+                        logger.debug("[LLM RAW RESPONSE][extraction].__dict__ keys=%s", list(getattr(extract_topic_resp, '__dict__', {}).keys()))
                 except Exception:
                     logger.debug("[LLM RAW RESPONSE][extraction] could not fully serialize response")
 
                 # extract text using helper
-                text = self._extract_text_from_response(resp)
+                text = self._extract_text_from_response(extract_topic_resp)
                 if not text:
                     raise ValueError('LLM returned no text for extraction')
 
@@ -270,9 +315,9 @@ class NoteGenerator:
                     raise ValueError('Extraction JSON missing chapters')
             except Exception as e:
                 logger.exception("Extraction LLM call failed or produced invalid JSON: %s", e)
-                extractor_result = self._create_fallback_structure(chapter_summary)
 
-                # Attempt to record the failed extraction prompt & exception to log
+                # Record the failed extraction prompt & exception to the per-run LLM log,
+                # then re-raise so callers know extraction failed.
                 try:
                     with open(llm_log, 'a', encoding='utf-8') as f:
                         f.write(f"--- LLM CALL [extraction] FAILED ({datetime.utcnow().isoformat()} UTC) ---\n")
@@ -281,6 +326,8 @@ class NoteGenerator:
                 except Exception:
                     logger.exception("Failed to append extraction failure to LLM log %s", llm_log)
 
+                raise
+
             extracted_chapters = extractor_result.get('chapters', [])
 
             # For each extracted chapter (usually one per input chapter), batch-generate notes in a SINGLE call
@@ -288,21 +335,26 @@ class NoteGenerator:
                 ex_title = ex.get('title') or chapter_title
                 topics = ex.get('topics') or [{'title': ex_title, 'description': ''}]
 
-                # Build topic -> supporting snippets map using retrieval heuristics (local)
+                # Build topic -> supporting snippets map using improved retrieval method
                 topic_snippets: Dict[str, str] = {}
                 for topic in topics:
-                    t_title = topic.get('title')
-                    key = (t_title or '').lower()
-                    snippets = []
-                    for c in chapter_chunks:
-                        ctext = c.get('content', '')
-                        if key and key in ctext.lower():
-                            snippets.append(ctext)
-                        if len(snippets) >= 5:
-                            break
-                    if not snippets:
-                        snippets = [c.get('content', '') for c in chapter_chunks[:3]]
-                    topic_snippets[t_title] = self._summarize_text(' '.join(snippets), max_chars=2000)
+                    t_title = topic.get('title', '')
+                    t_desc = topic.get('description', '')
+                    
+                    # Use our new helper method to find relevant snippets based on topic title and description
+                    relevant_snippets = self._find_relevant_snippets(
+                        topic_title=t_title,
+                        topic_desc=t_desc,
+                        chunks=chapter_chunks,
+                        max_snippets=5
+                    )
+                    
+                    # If we couldn't find any relevant snippets, fallback to the first few chunks
+                    if not relevant_snippets:
+                        relevant_snippets = [c.get('content', '') for c in chapter_chunks[:3]]
+                        
+                    # Summarize the combined snippets to fit within character limit
+                    topic_snippets[t_title] = self._summarize_text(' '.join(relevant_snippets), max_chars=2000)
 
                 # Build the batch prompt and log
                 batch_prompt = self._build_batch_notes_prompt(ex_title, topics, chapter_summary, topic_snippets)
@@ -315,7 +367,7 @@ class NoteGenerator:
                     logger.info("Sending batch notes prompt to LLM for chapter '%s' (topics=%d len=%d)", ex_title, len(topics), len(batch_prompt))
                     logger.debug("[LLM REQUEST][batch_notes] %s", batch_prompt)
                     client = self._get_client()
-                    resp2 = client.chat.completions.create(
+                    note_generation_resp = client.chat.completions.create(
                         messages=[{"role": "user", "content": batch_prompt}],
                         model=getattr(settings, 'cerebras_model', "gpt-oss-120b"),
                         stream=False,
@@ -327,21 +379,21 @@ class NoteGenerator:
                     # Log LLM batch-notes call
                     call_idx += 1
                     try:
-                        self._log_llm_call(llm_log, call_idx, 'batch_notes', batch_prompt, resp2)
+                        self._log_llm_call(llm_log, call_idx, 'batch_notes', batch_prompt, note_generation_resp)
                     except Exception:
                         logger.exception("Failed to record batch_notes LLM call to log")
 
                     # Log raw response shape for debugging
                     try:
-                        logger.debug("[LLM RAW RESPONSE][batch_notes] type=%s repr=%r", type(resp2), resp2)
-                        if isinstance(resp2, dict):
-                            logger.debug("[LLM RAW RESPONSE][batch_notes][dict] %s", json.dumps(resp2, default=str)[:10000])
-                        elif hasattr(resp2, '__dict__'):
-                            logger.debug("[LLM RAW RESPONSE][batch_notes].__dict__ keys=%s", list(getattr(resp2, '__dict__', {}).keys()))
+                        logger.debug("[LLM RAW RESPONSE][batch_notes] type=%s repr=%r", type(note_generation_resp), note_generation_resp)
+                        if isinstance(note_generation_resp, dict):
+                            logger.debug("[LLM RAW RESPONSE][batch_notes][dict] %s", json.dumps(note_generation_resp, default=str)[:10000])
+                        elif hasattr(note_generation_resp, '__dict__'):
+                            logger.debug("[LLM RAW RESPONSE][batch_notes].__dict__ keys=%s", list(getattr(note_generation_resp, '__dict__', {}).keys()))
                     except Exception:
                         logger.debug("[LLM RAW RESPONSE][batch_notes] could not fully serialize response")
 
-                    text2 = self._extract_text_from_response(resp2)
+                    text2 = self._extract_text_from_response(note_generation_resp)
                     if not text2:
                         raise ValueError('LLM returned no text for batch notes')
 
