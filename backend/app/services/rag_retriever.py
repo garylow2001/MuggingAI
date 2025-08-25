@@ -167,7 +167,7 @@ class RAGRetriever:
         
         return chunks
     
-    def extract_keywords(self, text: str, max_keywords: int = 10) -> List[str]:
+    def _extract_keywords(self, text: str, max_keywords: int = 10) -> List[str]:
         """
         Extract important keywords from text for query expansion.
         
@@ -213,7 +213,7 @@ class RAGRetriever:
             List of context chunks from hybrid search
         """
         # Extract query keywords
-        keywords = self.extract_keywords(query)
+        keywords = self._extract_keywords(query)
         
         # Create query variations
         query_variations = [query]  # Original query

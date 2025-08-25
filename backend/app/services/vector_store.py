@@ -127,8 +127,24 @@ class VectorStore:
 
         return arr
     
-    def store_embedding(self, embedding: List[float], chunk_id: int) -> str:
-        """Store a single embedding and return its ID."""
+    def store_embedding(
+        self,
+        embedding: List[float],
+        chunk_id: int,
+        content: Optional[str] = None,
+        course_id: Optional[int] = None,
+        file_id: Optional[int] = None,
+        chapter_title: Optional[str] = None,
+        chunk_index: Optional[int] = None,
+        page_number: Optional[int] = None,
+    ) -> str:
+        """
+        Store a single embedding and return its internal chunk id string.
+
+        This method now accepts metadata fields so callers can persist course/file/chapter
+        information into the single shared metadata store (metadata.json). That allows
+        filtering by `course_id` at query time while keeping one FAISS index.
+        """
         # Ensure FAISS index exists
         if self.index is None:
             self.index = faiss.IndexFlatIP(self.dimension)
@@ -140,22 +156,22 @@ class VectorStore:
         # Add to FAISS index
         self.index.add(embedding_array)
 
-        # Create metadata entry
+        # Create metadata entry with provided metadata (caller may pass None for some fields)
         chunk_id_str = f"chunk_{len(self.metadata)}"
         metadata_entry = {
             "id": chunk_id_str,
-            "content": "",  # Will be filled by the caller
-            "course_id": None,  # Will be filled by the caller
-            "file_id": None,  # Will be filled by the caller
-            "chapter_title": None,  # Will be filled by the caller
-            "chunk_index": None,  # Will be filled by the caller
-            "page_number": None,  # Will be filled by the caller
+            "content": content or "",
+            "course_id": course_id,
+            "file_id": file_id,
+            "chapter_title": chapter_title,
+            "chunk_index": chunk_index,
+            "page_number": page_number,
             "faiss_index": len(self.metadata),
-            "chunk_id": chunk_id  # Reference to the database chunk
+            "chunk_id": chunk_id,  # Reference to the database chunk
         }
         self.metadata.append(metadata_entry)
 
-        # Save index
+        # Persist index + metadata
         self._save_index()
 
         return chunk_id_str
@@ -193,10 +209,19 @@ class VectorStore:
             chunk_id = f"chunk_{len(self.metadata) + i}"
             chunk_ids.append(chunk_id)
             
+            # Normalize course_id to int when possible to make filtering reliable
+            c_id = chunk.get('course_id')
+            try:
+                if c_id is not None:
+                    c_id = int(c_id)
+            except Exception:
+                # leave as-is if cannot convert
+                pass
+
             metadata_entry = {
                 "id": chunk_id,
                 "content": chunk['content'],
-                "course_id": chunk.get('course_id'),
+                "course_id": c_id,
                 "file_id": chunk.get('file_id'),
                 "chapter_title": chunk.get('chapter_title'),
                 "chunk_index": chunk.get('chunk_index'),
@@ -226,8 +251,21 @@ class VectorStore:
                 metadata = self.metadata[idx]
                 
                 # Filter by course_id if specified
-                if course_id is not None and metadata.get('course_id') != course_id:
-                    continue
+                if course_id is not None:
+                    # tolerate int/str mismatches by comparing string forms as fallback
+                    meta_course = metadata.get('course_id')
+                    try:
+                        if meta_course is None:
+                            # no course metadata -> skip
+                            continue
+                        if isinstance(meta_course, int) and isinstance(course_id, int):
+                            if meta_course != course_id:
+                                continue
+                        else:
+                            if str(meta_course) != str(course_id):
+                                continue
+                    except Exception:
+                        continue
                 
                 results.append({
                     "id": metadata["id"],

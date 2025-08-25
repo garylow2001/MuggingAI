@@ -31,7 +31,7 @@ class RAGService:
             max_tokens: Maximum tokens for LLM output
         """
         self.retriever = retriever or RAGRetriever()
-        self.llm_client = llm_client or Cerebras(api_key=settings.cerebras_key)
+        self.llm_client = llm_client or Cerebras(api_key=settings.cerebras_api_key)
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.model = getattr(settings, 'cerebras_model', "gpt-oss-120b")

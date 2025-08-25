@@ -98,7 +98,17 @@ async def upload_file(
         embedding = await vector_store.get_embedding(chunk.content)
         if not embedding or len(embedding) != vector_store.dimension:
             raise ValueError(f"Invalid embedding length for chunk {chunk.id}: {len(embedding) if embedding else 0}")
-        chunk.embedding_id = vector_store.store_embedding(embedding, chunk.id)
+        # Store embedding with rich metadata so vector store metadata.json is populated
+        chunk.embedding_id = vector_store.store_embedding(
+            embedding,
+            chunk.id,
+            content=chunk.content,
+            course_id=chunk.course_id,
+            file_id=chunk.file_id,
+            chapter_title=chunk.chapter_title,
+            chunk_index=chunk.chunk_index,
+            page_number=chunk.page_number,
+        )
     db.commit()
 
     # Generate AI-powered notes
