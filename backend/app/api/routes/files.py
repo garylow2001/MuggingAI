@@ -49,7 +49,7 @@ async def upload_file(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Get file size
+    # Log file size
     file_size = os.path.getsize(file_path)
     logger.info(f"File saved successfully. Size: {file_size} bytes")
 
@@ -66,7 +66,7 @@ async def upload_file(
     db.commit()
     db.refresh(db_file)
 
-    # Process file content
+    # Process file content with chunking
     logger.info("Starting file content processing...")
     chunker = Chunker()
     chunks_data = chunker.process_file(file_path, course_id, db_file.id)

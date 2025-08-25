@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import courses, files, chunks, quizzes, chat, notes
+from app.api.routes import courses, files, chunks, quizzes, chat, notes, rag
 from app.core.config import settings
 import uvicorn
 import logging
@@ -38,6 +38,7 @@ app.include_router(chunks.router, prefix="/api/chunks", tags=["chunks"])
 app.include_router(quizzes.router, prefix="/api/quizzes", tags=["quizzes"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(notes.router, prefix="/api/notes", tags=["notes"])
+app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
 
 @app.get("/")
 async def root():
