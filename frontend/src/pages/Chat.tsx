@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Send, Bot, User } from "lucide-react";
+// removed unused Input import; using a textarea instead
+import { Send, Bot, User, ChevronUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api";
@@ -31,7 +31,9 @@ export function Chat() {
   const [courses, setCourses] = useState<{ id: number; name: string }[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
+  const [followUpsOpen, setFollowUpsOpen] = useState(false);
   const messagesRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   // auto-scroll to bottom when messages update or while loading
   useEffect(() => {
@@ -75,6 +77,7 @@ export function Chat() {
     setInputValue("");
     setIsLoading(true);
     setFollowUps([]);
+    setFollowUpsOpen(false);
 
     try {
       // Call RAG API
@@ -118,7 +121,9 @@ export function Chat() {
       setMessages((prev) => [...prev, aiMessage]);
 
       if (data.follow_up_questions && Array.isArray(data.follow_up_questions)) {
+        // store suggestions but do not auto-open the dropdown; user can open the pill
         setFollowUps(data.follow_up_questions);
+        setFollowUpsOpen(false);
       }
     } catch (e: any) {
       const errMsg: Message = {
@@ -139,6 +144,16 @@ export function Chat() {
       handleSendMessage();
     }
   };
+
+  // auto-resize textarea when the inputValue changes
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const max = 176; // px, roughly 11 lines
+    const next = Math.min(el.scrollHeight, max);
+    el.style.height = `${next}px`;
+  }, [inputValue]);
 
   return (
     <div className="space-y-6">
@@ -177,7 +192,7 @@ export function Chat() {
               </CardTitle>
             </CardHeader>
             {/* min-h-0 is required so the flex child can overflow and become scrollable */}
-            <CardContent className="flex-1 flex flex-col min-h-0">
+            <CardContent className="flex-1 flex flex-col min-h-0 relative">
               {/* Messages */}
               <div
                 ref={messagesRef}
@@ -260,35 +275,83 @@ export function Chat() {
                 )}
               </div>
 
-              {/* Follow-up quick prompts (rendered when available) */}
+              {/* Follow-ups: pill when closed; glassmorphic shadcn-styled dropdown when open */}
               {followUps.length > 0 && (
-                <div className="mb-3">
-                  <div className="text-sm font-medium mb-2">
-                    Suggested follow-ups
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {followUps.map((q, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setInputValue(q)}
-                        className="px-3 py-1 text-sm rounded-full border border-neutral-200 bg-white hover:bg-neutral-50 transition shadow-sm hover:shadow-md"
-                      >
-                        {q}
-                      </button>
-                    ))}
+                <div className="mb-3 w-full flex justify-center">
+                  <div className="w-full max-w-3xl">
+                    {/* pill (hidden while open) */}
+                    {!followUpsOpen && (
+                      <div className="flex justify-center">
+                        <button
+                          onClick={() => setFollowUpsOpen(true)}
+                          className="mx-auto flex items-center gap-2 px-4 py-2 rounded-full bg-white/20 backdrop-blur-sm border border-slate-200/20 shadow-sm hover:shadow-md transition"
+                        >
+                          <span className="text-sm font-medium">
+                            Suggested follow-ups
+                          </span>
+                          <ChevronUp className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* dropdown panel (shadcn style) */}
+                    {followUpsOpen && (
+                      <div className="mt-2 -translate-y-2 w-full max-h-[48vh] overflow-auto p-4 flex flex-col gap-3 rounded-2xl bg-white/10 backdrop-blur-md border border-slate-200/10 shadow-2xl">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-semibold">
+                            Suggested follow-ups
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Click a suggestion to populate the input
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          {followUps.map((q, i) => (
+                            <Button
+                              key={i}
+                              variant="ghost"
+                              onClick={() => {
+                                setInputValue(q);
+                                setFollowUpsOpen(false);
+                              }}
+                              className="w-full justify-start px-3 py-2 rounded-lg text-sm 
+                                hover:bg-gray-100 whitespace-normal break-words 
+                                overflow-hidden text-left transition-colors"
+                            >
+                              {q}
+                            </Button>
+                          ))}
+                        </div>
+
+                        {/* bottom-centered down arrow to close */}
+                        <div className="flex justify-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setFollowUpsOpen(false)}
+                            className="rounded-full w-9 h-9 flex items-center justify-center"
+                          >
+                            <ChevronUp className="h-4 w-4 rotate-180" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
               {/* Input */}
               <div className="flex space-x-2">
-                <Input
+                <textarea
+                  ref={inputRef}
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  onKeyPress={handleKeyPress}
+                  onKeyDown={handleKeyPress}
                   placeholder="Ask a question about your course content..."
                   disabled={isLoading}
-                  className="flex-1"
+                  aria-label="Message"
+                  className="flex-1 min-h-[44px] max-h-44 resize-none overflow-auto rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
                 <Button
                   onClick={handleSendMessage}
