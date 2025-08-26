@@ -179,6 +179,21 @@ export const api = {
     }
   },
 
+  async generateNotes(
+    courseId: number,
+    fileId?: number
+  ): Promise<{ message: string; notes_generated: number }> {
+    const url = fileId
+      ? `${API_BASE_URL}/files/generate-notes/${courseId}?file_id=${fileId}`
+      : `${API_BASE_URL}/files/generate-notes/${courseId}`;
+    const response = await fetch(url, { method: "POST" });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Failed to generate notes");
+    }
+    return response.json();
+  },
+
   // Notes
   async getCourseNotes(courseId: number): Promise<TopicWithNotes[]> {
     const response = await fetch(`${API_BASE_URL}/notes/course/${courseId}`);

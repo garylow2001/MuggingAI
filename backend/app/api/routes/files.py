@@ -110,83 +110,19 @@ async def upload_file(
             page_number=chunk.page_number,
         )
     db.commit()
-
-    # Generate AI-powered notes
-    note_generator = NoteGenerator()
-    structured_notes = note_generator.process_course_content(chunks_data)
-    logger.info(f"Generated {len(structured_notes)} structured notes")
-    logger.info(f"Structured notes content:\n{json.dumps(structured_notes, ensure_ascii=False, indent=2)}")
-
-    # Save topics and notes to database
-    for note_data in structured_notes:
-        # Create or find topic
-        topic = db.query(Topic).filter(
-            Topic.title == note_data['topic_title'],
-            Topic.course_id == course_id
-        ).first()
-        
-        if not topic:
-            topic = Topic(
-                title=note_data['topic_title'],
-                chapter_title=note_data['chapter_title'],
-                course_id=course_id
-            )
-            db.add(topic)
-            db.commit()
-            db.refresh(topic)
-        
-        # Normalize note content to string for DB storage (avoid list/dict binding errors)
-        # Check for both 'notes_content' and 'notes' keys to handle different response formats
-        raw_content = note_data.get('notes_content', note_data.get('notes', ''))
-        
-        # If it's a list, format as bullet points
-        if isinstance(raw_content, list):
-            # Make sure each item starts with a bullet
-            note_content = '\n'.join([
-                f"- {str(item).strip('- ')}" for item in raw_content
-            ])
-        elif isinstance(raw_content, dict):
-            # Convert dict to formatted JSON
-            note_content = json.dumps(raw_content, ensure_ascii=False, indent=2)
-        elif raw_content is None:
-            # Empty string for None values
-            note_content = ''
-        else:
-            # Convert to string and ensure proper bullet point formatting
-            content_str = str(raw_content)
-            
-            # If content already has bullet points, keep them as is
-            if re.search(r'^\s*[-•*]\s', content_str, re.MULTILINE):
-                note_content = content_str
-            else:
-                # Convert text with newlines to bullet points if not already formatted
-                lines = content_str.strip().split('\n')
-                note_content = '\n'.join([f"- {line.strip('- ')}" for line in lines if line.strip()])
-                
-        # Log what we're saving
-        logger.info(f"Saving note content for topic '{note_data['topic_title']}', content starts with: {note_content[:50]}...")
-
-        # Create note
-        note = Note(
-            content=note_content,
-            topic_id=topic.id,
-            course_id=course_id
-        )
-        db.add(note)
-    db.commit()
-
     # Get chunk statistics
     chunk_stats = chunker.get_chunk_statistics(chunks_data)
-    
-    logger.info(f"Upload complete. File ID: {db_file.id}, Chunks: {len(chunks)}, Notes: {len(structured_notes)}")
-    
+
+    logger.info(f"Upload complete. File ID: {db_file.id}, Chunks: {len(chunks)} (notes generation deferred)")
+
+    # Return without generating notes. Notes can be generated later via the generate-notes endpoint.
     return {
-        "message": "File uploaded and processed successfully",
+        "message": "File uploaded and processed successfully (notes generation deferred)",
         "file_id": db_file.id,
         "filename": file.filename,
         "file_size": file_size,
         "chunks_created": len(chunks),
-        "notes_generated": len(structured_notes) if 'structured_notes' in locals() else 0,
+        "notes_generated": 0,
         "statistics": chunk_stats
     }
 
@@ -210,6 +146,100 @@ async def get_course_files(course_id: int, db: Session = Depends(get_db)):
         }
         for file in files
     ]
+
+
+@router.post("/generate-notes/{course_id}")
+async def generate_notes(course_id: int, file_id: int | None = None, db: Session = Depends(get_db)):
+    """Generate notes for a course or a specific file. This runs the NoteGenerator over existing chunks
+    and saves Topics and Notes into the database. If `file_id` is provided it will only process chunks
+    for that file, otherwise it will process all chunks for the course.
+    """
+    logger.info(f"Starting note generation for course {course_id} file_id={file_id}")
+
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        logger.error(f"Course {course_id} not found for note generation")
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    # Build chunks_data from DB
+    query = db.query(Chunk).filter(Chunk.course_id == course_id)
+    if file_id is not None:
+        query = query.filter(Chunk.file_id == file_id)
+
+    db_chunks = query.order_by(Chunk.chunk_index).all()
+    if not db_chunks:
+        logger.warning("No chunks found to generate notes from")
+        raise HTTPException(status_code=400, detail="No chunks available for note generation")
+
+    chunks_data = []
+    for c in db_chunks:
+        chunks_data.append({
+            'content': c.content,
+            'chunk_index': c.chunk_index,
+            'chapter_title': c.chapter_title,
+            'page_number': c.page_number,
+            'course_id': c.course_id,
+            'file_id': c.file_id,
+        })
+
+    # Run note generation (may call LLMs and take time)
+    note_generator = NoteGenerator()
+    try:
+        structured_notes = note_generator.process_course_content(chunks_data)
+    except Exception as e:
+        logger.exception("Note generation failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Note generation failed: {str(e)}")
+
+    logger.info(f"Generated {len(structured_notes)} structured notes; saving to DB")
+
+    # Save topics and notes to database
+    for note_data in structured_notes:
+        topic = db.query(Topic).filter(
+            Topic.title == note_data['topic_title'],
+            Topic.course_id == course_id
+        ).first()
+
+        if not topic:
+            topic = Topic(
+                title=note_data['topic_title'],
+                chapter_title=note_data.get('chapter_title'),
+                course_id=course_id
+            )
+            db.add(topic)
+            db.commit()
+            db.refresh(topic)
+
+        raw_content = note_data.get('notes_content', note_data.get('notes', ''))
+
+        if isinstance(raw_content, list):
+            note_content = '\n'.join([f"- {str(item).strip('- ')}" for item in raw_content])
+        elif isinstance(raw_content, dict):
+            note_content = json.dumps(raw_content, ensure_ascii=False, indent=2)
+        elif raw_content is None:
+            note_content = ''
+        else:
+            content_str = str(raw_content)
+            if re.search(r'^\s*[-•*]\s', content_str, re.MULTILINE):
+                note_content = content_str
+            else:
+                lines = content_str.strip().split('\n')
+                note_content = '\n'.join([f"- {line.strip('- ')}" for line in lines if line.strip()])
+
+        logger.info(f"Saving note for topic '%s' (starts: %s)", note_data['topic_title'], note_content[:50])
+
+        note = Note(
+            content=note_content,
+            topic_id=topic.id,
+            course_id=course_id
+        )
+        db.add(note)
+
+    db.commit()
+
+    return {
+        "message": "Notes generated and saved",
+        "notes_generated": len(structured_notes)
+    }
 
 @router.delete("/{file_id}")
 async def delete_file(file_id: int, db: Session = Depends(get_db)):
