@@ -3,15 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Upload,
-  FileText,
   X,
   CheckCircle,
   AlertCircle,
   Loader2,
   Info,
-  Eye,
 } from "lucide-react";
 import { api, FileUploadResponse } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface FileUploadProps {
   courseId: number;
@@ -28,7 +27,7 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
   );
   const [isGeneratingNotes, setIsGeneratingNotes] = useState(false);
   const [error, setError] = useState<string>("");
-  const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const { toast } = useToast();
   const [showFileDetails, setShowFileDetails] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -125,8 +124,6 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
 
       clearInterval(progressInterval);
       setUploadProgress(100);
-
-      console.log("Upload successful:", result);
       setUploadResult(result);
       try {
         // persist the upload result so it remains visible across parent reloads
@@ -162,6 +159,32 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
       /* ignore */
     }
     setUploadProgress(0);
+  };
+
+  const handleGenerateNotes = async () => {
+    if (!uploadResult) return;
+    setIsGeneratingNotes(true);
+    try {
+      const res = await api.generateNotes(courseId, uploadResult.file_id);
+
+      // Clear persisted upload result so it is not retained after notes are created
+      const key = `lastUploadResult_course_${courseId}`;
+      localStorage.removeItem(key);
+
+      // Remove upload result from state
+      setUploadResult(null);
+
+      // Show toast confirmation
+      toast({
+        title: `${res.notes_generated} Notes generated successfully`,
+        description: "Open the Notes tab to view them.",
+      });
+    } catch (e) {
+      console.error("Generate notes error", e);
+      setError(e instanceof Error ? e.message : "Failed to generate notes");
+    } finally {
+      setIsGeneratingNotes(false);
+    }
   };
 
   // Restore persisted upload result on mount (per course)
@@ -379,46 +402,7 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
                   )}
                 <div className="mt-3">
                   <Button
-                    onClick={async () => {
-                      if (!uploadResult) return;
-                      setIsGeneratingNotes(true);
-                      try {
-                        const res = await api.generateNotes(
-                          courseId,
-                          uploadResult.file_id
-                        );
-
-                        // Clear persisted upload result so it is not retained after notes are created
-                        try {
-                          const key = `lastUploadResult_course_${courseId}`;
-                          localStorage.removeItem(key);
-                        } catch (e) {
-                          /* ignore */
-                        }
-
-                        // Update in-memory count only (do NOT persist)
-                        setUploadResult((prev) =>
-                          prev
-                            ? { ...prev, notes_generated: res.notes_generated }
-                            : prev
-                        );
-
-                        // Show a temporary, friendly confirmation and prompt to view notes
-                        setSuccessNotice(
-                          "Notes generated successfully — open the Notes tab to view them."
-                        );
-                        setTimeout(() => setSuccessNotice(null), 4500);
-                      } catch (e) {
-                        console.error("Generate notes error", e);
-                        setError(
-                          e instanceof Error
-                            ? e.message
-                            : "Failed to generate notes"
-                        );
-                      } finally {
-                        setIsGeneratingNotes(false);
-                      }
-                    }}
+                    onClick={handleGenerateNotes}
                     disabled={isGeneratingNotes}
                     size="sm"
                     type="button"
@@ -451,11 +435,6 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
                     Dismiss
                   </Button>
                 </div>
-                {successNotice && (
-                  <div className="mt-2 p-2 bg-blue-50 text-blue-800 rounded">
-                    {successNotice}
-                  </div>
-                )}
               </div>
             </div>
           )}
