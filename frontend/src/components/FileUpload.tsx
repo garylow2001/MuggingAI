@@ -137,7 +137,7 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
       // Reset progress after showing result and notify parent to reload data
       setTimeout(() => {
         setUploadProgress(0);
-        onUploadComplete();
+        // onUploadComplete();
       }, 2000);
     } catch (err) {
       console.error("Upload error:", err);
@@ -174,10 +174,12 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
       // Remove upload result from state
       setUploadResult(null);
 
-      // Show toast confirmation
+      // Show toast confirmation with green tick and 5s auto-dismiss
       toast({
         title: `${res.notes_generated} Notes generated successfully`,
         description: "Open the Notes tab to view them.",
+        icon: <CheckCircle className="h-5 w-5 text-green-600" />,
+        duration: 5000,
       });
     } catch (e) {
       console.error("Generate notes error", e);
