@@ -63,6 +63,11 @@ export interface FileUploadResponse {
     unique_chapters: number;
     chapters: string[];
   };
+  summaries?: {
+    chunk_index?: number;
+    file_id?: number;
+    summary: string;
+  }[];
 }
 
 // API functions

@@ -432,6 +432,25 @@ export function FileUpload({ courseId }: FileUploadProps) {
                     )}
                   </Button>
                 </div>
+                {uploadResult.summaries &&
+                  uploadResult.summaries.length > 0 && (
+                    <div className="mt-4 p-3 bg-white rounded border">
+                      <strong>Summaries</strong>
+                      <ul className="list-disc list-inside mt-2 text-sm text-green-700">
+                        {uploadResult.summaries.map((s, idx) => (
+                          <li key={idx}>
+                            <span className="font-medium">
+                              Chunk {s.chunk_index}
+                            </span>
+                            {s.file_id ? (
+                              <span> (File {s.file_id})</span>
+                            ) : null}
+                            : {s.summary}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 <div className="mt-2">
                   <Button
                     variant="ghost"
