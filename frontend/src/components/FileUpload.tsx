@@ -10,14 +10,14 @@ import {
   Info,
 } from "lucide-react";
 import { api, FileUploadResponse } from "@/lib/api";
+import { mutate } from "swr";
 import { useToast } from "@/hooks/use-toast";
 
 interface FileUploadProps {
   courseId: number;
-  onUploadComplete: () => void;
 }
 
-export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
+export function FileUpload({ courseId }: FileUploadProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -134,10 +134,15 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
       }
       setSelectedFile(null);
 
-      // Reset progress after showing result and notify parent to reload data
+      // Reset progress after showing result. Revalidate files and course counts.
       setTimeout(() => {
         setUploadProgress(0);
-        // onUploadComplete();
+        try {
+          mutate(["courseFiles", courseId]);
+          mutate(["course", courseId]);
+        } catch (e) {
+          // ignore
+        }
       }, 2000);
     } catch (err) {
       console.error("Upload error:", err);
@@ -173,6 +178,14 @@ export function FileUpload({ courseId, onUploadComplete }: FileUploadProps) {
 
       // Remove upload result from state
       setUploadResult(null);
+
+      // Revalidate notes and course data
+      try {
+        mutate(["courseNotes", courseId]);
+        mutate(["course", courseId]);
+      } catch (e) {
+        // ignore
+      }
 
       // Show toast confirmation with green tick and 5s auto-dismiss
       toast({
