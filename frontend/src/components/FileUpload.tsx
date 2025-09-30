@@ -242,11 +242,11 @@ export function FileUpload({ courseId }: FileUploadProps) {
     const extension = filename.split(".").pop()?.toLowerCase();
     switch (extension) {
       case "pdf":
-        return "Portable Document Format - Best for documents with complex formatting";
+        return "PDF - Best for documents with complex formatting";
       case "docx":
-        return "Microsoft Word Document - Best for rich text documents";
+        return "DOCX - Best for rich text documents";
       case "txt":
-        return "Plain Text - Best for simple text content";
+        return "TXT - Best for simple text content";
       default:
         return "Unknown file type";
     }

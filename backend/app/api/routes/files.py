@@ -3,7 +3,6 @@ import json
 import os
 import re
 import shutil
-from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from app.models.database import get_db, Course, File as FileModel, Chunk, Topic, Note
