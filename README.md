@@ -19,13 +19,16 @@ Transform lengthy educational materials into digestible, interactive learning ex
 - **ShadCN UI** for beautiful, accessible components
 - **Zustand** for state management
 - **TanStack Query** for data fetching
+- **useSWR** for fast, lightweight and reusable data fetching and caching
 
 ### Backend
 
 - **FastAPI** for high-performance API
 - **OpenAI GPT-4** for content processing and quiz generation
 - **FAISS** for vector similarity search
-- **PostgreSQL** for data persistence
+- **SQLite3** for data persistence
+- **Celery** for distributed background task processing
+- **Redis** as Celery broker and progress store
 - **Model Context Provider (MCP)** for optimized LLM interactions
 
 ## 🛠️ Setup
@@ -34,7 +37,6 @@ Transform lengthy educational materials into digestible, interactive learning ex
 
 - Python 3.9+
 - Node.js 18+
-- PostgreSQL (optional, SQLite for development)
 
 ### Backend Setup
 
@@ -43,6 +45,15 @@ cd backend
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+
+# Start Redis server
+redis-server
+
+# Start Celery worker
+cd backend
+celery -A app.celery_worker.celery_app worker --pool=solo --loglevel=info
+
+# Start FastAPI server
 uvicorn main:app --reload
 ```
 

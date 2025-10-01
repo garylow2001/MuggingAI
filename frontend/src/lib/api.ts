@@ -49,14 +49,12 @@ export interface TopicWithNotes {
   notes: Note[];
 }
 
-export interface FileUploadResponse {
-  message: string;
-  file_id: number;
-  filename: string;
-  file_size: number;
-  chunks_created: number;
-  notes_generated: number;
-  statistics: {
+export interface FileUploadStatusResult {
+  file_id?: number;
+  filename?: string;
+  file_size?: number;
+  chunks_created?: number;
+  statistics?: {
     total_chunks: number;
     total_words: number;
     average_chunk_size: number;
@@ -68,6 +66,17 @@ export interface FileUploadResponse {
     file_id?: number;
     summary: string;
   }[];
+}
+export interface FileUploadStatusResponse {
+  job_id: string;
+  status: string;
+  progress_messages: string[];
+  result?: FileUploadStatusResult;
+}
+
+export interface UploadJobResponse {
+  message: string;
+  job_id: string;
 }
 
 // API functions
@@ -128,17 +137,8 @@ export const api = {
     }
   },
 
-  // Health check
-  async healthCheck(): Promise<{ status: string; service: string }> {
-    const response = await fetch("http://localhost:8000/health");
-    if (!response.ok) {
-      throw new Error("Backend is not responding");
-    }
-    return response.json();
-  },
-
   // Files
-  async uploadFile(courseId: number, file: File): Promise<FileUploadResponse> {
+  async uploadFile(courseId: number, file: File): Promise<UploadJobResponse> {
     const formData = new FormData();
     formData.append("file", file);
 
@@ -161,6 +161,17 @@ export const api = {
     const result = await response.json();
     console.log("Upload success:", result);
     return result;
+  },
+
+  async getUploadStatus(jobId: string): Promise<FileUploadStatusResponse> {
+    const response = await fetch(
+      `${API_BASE_URL}/files/upload/status/${jobId}`
+    );
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || "Failed to get upload status");
+    }
+    return response.json();
   },
 
   async getCourseFiles(courseId: number): Promise<FileUpload[]> {

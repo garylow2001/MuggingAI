@@ -272,7 +272,6 @@ config.json
 *.pdf
 *.docx
 *.doc
-*.txt
 *.mp4
 *.mp3
 *.zip

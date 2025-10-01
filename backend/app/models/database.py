@@ -133,6 +133,24 @@ class Note(Base):
     course = relationship("Course", back_populates="notes")
 
 
+class FileUploadJob(Base):
+    __tablename__ = "file_upload_jobs"
+
+    id = Column(String, primary_key=True, index=True)
+    course_id = Column(Integer, nullable=False)
+    file_name = Column(String, nullable=True)
+    status = Column(
+        String, default="pending"
+    )  # pending, saving, chunking, embedding, summarizing, done, error
+    step = Column(
+        String, default="pending"
+    )  # saving_file, chunking, embedding, summarizing, etc
+    progress = Column(Integer, default=0)  # 0-100
+    error_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Summary(Base):
     __tablename__ = "summaries"
 

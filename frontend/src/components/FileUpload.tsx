@@ -9,7 +9,11 @@ import {
   Loader2,
   Info,
 } from "lucide-react";
-import { api, FileUploadResponse } from "@/lib/api";
+import {
+  api,
+  FileUploadStatusResponse,
+  FileUploadStatusResult,
+} from "@/lib/api";
 import { mutate } from "swr";
 import { useToast } from "@/hooks/use-toast";
 
@@ -21,10 +25,8 @@ export function FileUpload({ courseId }: FileUploadProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [uploadResult, setUploadResult] = useState<FileUploadResponse | null>(
-    null
-  );
+  const [uploadResult, setUploadResult] =
+    useState<FileUploadStatusResult | null>(null);
   const [isGeneratingNotes, setIsGeneratingNotes] = useState(false);
   const [error, setError] = useState<string>("");
   const { toast } = useToast();
@@ -101,57 +103,54 @@ export function FileUpload({ courseId }: FileUploadProps) {
     return true;
   };
 
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<any>(null);
+  const [polling, setPolling] = useState(false);
+
   const handleUpload = async () => {
     if (!selectedFile) return;
-
     setIsUploading(true);
     setError("");
     setUploadResult(null);
-    setUploadProgress(0);
 
     try {
-      console.log("Starting file upload...");
-
-      // Simulate progress updates
-      const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev >= 90) return prev;
-          return prev + Math.random() * 10;
-        });
-      }, 200);
-
       const result = await api.uploadFile(courseId, selectedFile);
-
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-      setUploadResult(result);
-      try {
-        // persist the upload result so it remains visible across parent reloads
-        const key = `lastUploadResult_course_${courseId}`;
-        localStorage.setItem(key, JSON.stringify(result));
-      } catch (e) {
-        console.warn("Failed to persist upload result", e);
+      if (result.job_id) {
+        setJobId(result.job_id);
+        setPolling(true);
+      } else {
+        setError("No job ID returned from backend");
+        setIsUploading(false);
       }
       setSelectedFile(null);
-
-      // Reset progress after showing result. Revalidate files and course counts.
-      setTimeout(() => {
-        setUploadProgress(0);
-        try {
-          mutate(["courseFiles", courseId]);
-          mutate(["course", courseId]);
-        } catch (e) {
-          // ignore
-        }
-      }, 2000);
     } catch (err) {
-      console.error("Upload error:", err);
       setError(err instanceof Error ? err.message : "Upload failed");
-      setUploadProgress(0);
-    } finally {
       setIsUploading(false);
     }
   };
+
+  // Polling effect for job status
+  useEffect(() => {
+    if (!jobId || !polling) return;
+    const interval = setInterval(async () => {
+      try {
+        const status = await api.getUploadStatus(jobId);
+        setJobStatus(status);
+        // Progress is now the number of messages
+        if (status.status === "SUCCESS" || status.status === "FAILURE") {
+          setPolling(false);
+          setIsUploading(false);
+          setUploadResult(status.result || null);
+        }
+        if (status.status === "FAILURE") {
+          setError("Upload failed");
+        }
+      } catch (e) {
+        // handle error
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [jobId, polling]);
 
   const removeFile = () => {
     setSelectedFile(null);
@@ -163,7 +162,6 @@ export function FileUpload({ courseId }: FileUploadProps) {
     } catch (e) {
       /* ignore */
     }
-    setUploadProgress(0);
   };
 
   const handleGenerateNotes = async () => {
@@ -208,8 +206,8 @@ export function FileUpload({ courseId }: FileUploadProps) {
       const key = `lastUploadResult_course_${courseId}`;
       const raw = localStorage.getItem(key);
       if (raw) {
-        const parsed = JSON.parse(raw) as FileUploadResponse;
-        setUploadResult(parsed);
+        const parsed = JSON.parse(raw) as FileUploadStatusResponse;
+        setUploadResult(parsed.result || null);
       }
     } catch (e) {
       console.warn("Failed to restore persisted upload result", e);
@@ -334,18 +332,25 @@ export function FileUpload({ courseId }: FileUploadProps) {
             </div>
           )}
 
-          {/* Upload Progress */}
+          {/* Modern Progress Status */}
           {isUploading && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span>Processing file...</span>
-                <span>{Math.round(uploadProgress)}%</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-primary h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                />
+              <div className="flex flex-col gap-2 mt-2">
+                {jobStatus?.progress_messages?.map(
+                  (msg: string, idx: number) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-primary" />
+                      <span className="text-sm text-gray-800">{msg}</span>
+                    </div>
+                  )
+                )}
+                {/* Skeleton loader for next message */}
+                {polling && (
+                  <div className="flex items-center gap-2 animate-pulse">
+                    <Loader2 className="h-4 w-4 text-gray-400" />
+                    <span className="h-4 w-32 bg-gray-200 rounded" />
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -389,20 +394,20 @@ export function FileUpload({ courseId }: FileUploadProps) {
               </div>
               <div className="space-y-2 text-sm text-green-700">
                 <p>
-                  <strong>File:</strong> {uploadResult.filename}
+                  <strong>File:</strong> {uploadResult?.filename}
                 </p>
                 <p>
-                  <strong>Chunks created:</strong> {uploadResult.chunks_created}
+                  <strong>Chunks created:</strong>{" "}
+                  {uploadResult?.chunks_created}
                 </p>
                 <p>
-                  <strong>Notes generated:</strong>{" "}
-                  {uploadResult.notes_generated}
+                  {/* Notes generated field removed, not present in result object */}
                 </p>
                 <p>
                   <strong>Chapters detected:</strong>{" "}
-                  {uploadResult.statistics.unique_chapters}
+                  {uploadResult?.statistics?.unique_chapters}
                 </p>
-                {uploadResult.statistics.chapters &&
+                {uploadResult?.statistics?.chapters &&
                   uploadResult.statistics.chapters.length > 0 && (
                     <div>
                       <strong>Chapters:</strong>

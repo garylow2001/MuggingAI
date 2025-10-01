@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./mindcrush.db"
 
+    # Celery message broker (Redis)
+    celery_broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+    celery_result_backend: str = os.getenv(
+        "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
+    )
+    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
     # Cerebras Configuration
     cerebras_api_key: str = os.environ.get("CEREBRAS_API_KEY", "no_api_key_provided")
     cerebras_model: str = "llama3.1-8b"

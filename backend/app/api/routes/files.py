@@ -4,177 +4,76 @@ import os
 import re
 import shutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from app.celery_worker import celery_app
+from celery.result import AsyncResult
+import redis
+import json
 from sqlalchemy.orm import Session
 from app.models.database import get_db, Course, File as FileModel, Chunk, Topic, Note
-from app.models.database import Summary
+from app.models.database import Summary, FileUploadJob
 from app.services.chunker import Chunker
 from app.services.note_generator import NoteGenerator
 from app.services.vector_store import VectorStore
 from app.services.summarizer_singleton import get_summarizer
 from app.core.config import settings
 import uuid
+from datetime import datetime
 import logging
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+
+# Ensure uploads directory exists
+os.makedirs(settings.uploads_dir, exist_ok=True)
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["files"])
 
-# Ensure uploads directory exists
-os.makedirs(settings.uploads_dir, exist_ok=True)
+
+@router.get("/upload/status/{job_id}")
+async def get_upload_status(job_id: str):
+    redis_client = redis.Redis.from_url(settings.redis_url)
+    status_key = f"upload_status:{job_id}"
+    status_msgs = redis_client.get(status_key)
+    status_list = json.loads(status_msgs) if status_msgs else []
+    celery_result: AsyncResult = celery_app.AsyncResult(job_id)
+    logger.info(f"Celery status for job {job_id}: {celery_result.status}")
+    logger.info(f"Celery raw result for job {job_id}: {celery_result.result}")
+    # Wait for result to be ready if status is SUCCESS but result is None
+    result_data = None
+    if celery_result.status == "SUCCESS":
+        result_data = celery_result.result
+        if result_data is None:
+            logger.warning(f"Result for job {job_id} is None.")
+    return {
+        "job_id": job_id,
+        "status": celery_result.status,
+        "progress_messages": status_list,
+        "result": result_data,
+    }
 
 
 @router.post("/upload/{course_id}")
 async def upload_file(
     course_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
-    """Upload a file to a course and process it for AI analysis.
-    Updates the vector store as well as the database (for note generation)."""
-
-    logger.info(f"Starting file upload for course {course_id}")
-    logger.info(f"File: {file.filename}, Size: {file.size}, Type: {file.content_type}")
-
-    # Validate course exists
+    """Start a job for file upload and processing. Returns job_id immediately."""
+    logger.info(f"Starting async file upload for course {course_id}")
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         logger.error(f"Course {course_id} not found")
         raise HTTPException(status_code=404, detail="Course not found")
 
-    # Prepare file paths and names
-    file_extension = os.path.splitext(file.filename)[1] or ""
-    unique_filename = f"{uuid.uuid4().hex}{file_extension}"
-    file_path = os.path.join(settings.uploads_dir, unique_filename)
+    # Read file bytes
+    file_bytes = await file.read()
 
-    # Save file to disk
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    # Log file size
-    file_size = os.path.getsize(file_path)
-    logger.info(f"File saved successfully. Size: {file_size} bytes")
-
-    # Create file record in database
-    db_file = FileModel(
-        filename=unique_filename,
-        original_filename=file.filename,
-        file_path=file_path,
-        file_type=file_extension[1:],  # Remove the dot
-        file_size=file_size,
-        course_id=course_id,
+    logger.info(f"Starting Celery job for file {file.filename}")
+    # Enqueue Celery background job
+    task = celery_app.send_task(
+        "app.tasks.process_file_job.process_file_job",
+        args=[course_id, file_bytes, file.filename, file.content_type],
     )
-    db.add(db_file)
-    db.commit()
-    db.refresh(db_file)
-
-    # Process file content with chunking
-    logger.info("Starting file content processing...")
-    chunker = Chunker()
-    chunks_data = chunker.process_file(file_path, course_id, db_file.id)
-    logger.info(f"File processing complete. Created {len(chunks_data)} chunks")
-    if not chunks_data:
-        raise HTTPException(status_code=500, detail="Failed to process file content")
-
-    # Save chunks to database
-    logger.info("Saving chunks to database...")
-    chunks = []
-    for chunk_data in chunks_data:
-        chunk = Chunk(
-            content=chunk_data["content"],
-            chunk_index=chunk_data["chunk_index"],
-            chapter_title=chunk_data.get("chapter_title"),
-            page_number=chunk_data.get("page_number"),
-            course_id=course_id,
-            file_id=db_file.id,
-        )
-        db.add(chunk)
-        chunks.append(chunk)
-    db.commit()
-    logger.info(f"Successfully saved {len(chunks)} chunks to database")
-
-    # Generate embeddings for chunks
-    vector_store = VectorStore()
-    for chunk in chunks:
-        # use async wrapper to avoid blocking in async route
-        embedding = await vector_store.get_embedding(chunk.content)
-        if not embedding or len(embedding) != vector_store.dimension:
-            raise ValueError(
-                f"Invalid embedding length for chunk {chunk.id}: {len(embedding) if embedding else 0}"
-            )
-        # Store embedding with rich metadata so vector store metadata.json is populated
-        chunk.embedding_id = vector_store.store_embedding(
-            embedding,
-            chunk.id,
-            content=chunk.content,
-            course_id=chunk.course_id,
-            file_id=chunk.file_id,
-            chapter_title=chunk.chapter_title,
-            chunk_index=chunk.chunk_index,
-            page_number=chunk.page_number,
-        )
-    db.commit()
-    # Get chunk statistics
-    chunk_stats = chunker.get_chunk_statistics(chunks_data)
-
-    # Summarize chunks using the global summarizer singleton (run in thread to avoid blocking)
-    summaries = []
-    try:
-        summarizer = get_summarizer()
-        if summarizer is not None:
-            loop = asyncio.get_running_loop()
-            summaries = await loop.run_in_executor(
-                None, summarizer.summarize_chunks, chunks_data
-            )
-            logger.info(f"Generated summaries for {len(summaries)} chunks")
-        else:
-            logger.warning("Summarizer not initialized; skipping chunk summarization")
-            summaries = []
-    except Exception as e:
-        logger.exception("Chunk summarization failed: %s", e)
-        summaries = []
-
-    # Persist summaries to database (associate with chunks/files if possible)
-    try:
-        for s in summaries:
-            # Find matching chunk id for this chunk_index and file_id
-            chunk_obj = (
-                db.query(Chunk)
-                .filter(
-                    Chunk.course_id == course_id,
-                    Chunk.file_id == s.get("file_id"),
-                    Chunk.chunk_index == s.get("chunk_index"),
-                )
-                .first()
-            )
-
-            summary_record = Summary(
-                content=s.get("summary") or "",
-                chunk_id=chunk_obj.id if chunk_obj else None,
-                chunk_index=s.get("chunk_index"),
-                file_id=s.get("file_id"),
-                course_id=course_id,
-            )
-            db.add(summary_record)
-
-        db.commit()
-    except Exception:
-        logger.exception("Failed to persist summaries to database")
-        db.rollback()
-
-    logger.info(
-        f"Upload complete. File ID: {db_file.id}, Chunks: {len(chunks)} (notes generation deferred)"
-    )
-
-    # Return without generating notes. Notes can be generated later via the generate-notes endpoint.
-    return {
-        "message": "File uploaded and processed successfully (notes generation deferred)",
-        "file_id": db_file.id,
-        "filename": file.filename,
-        "file_size": file_size,
-        "chunks_created": len(chunks),
-        "notes_generated": 0,
-        "statistics": chunk_stats,
-        "summaries": summaries,
-    }
+    return {"message": "File upload job started", "job_id": task.id}
 
 
 @router.get("/{course_id}")
