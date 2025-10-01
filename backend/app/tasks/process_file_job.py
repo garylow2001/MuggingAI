@@ -66,7 +66,6 @@ def process_file_job(self, course_id, file_bytes, original_filename, content_typ
         chunk = Chunk(
             content=chunk_data["content"],
             chunk_index=chunk_data["chunk_index"],
-            chapter_title=chunk_data.get("chapter_title"),
             page_number=chunk_data.get("page_number"),
             course_id=course_id,
             file_id=db_file.id,
@@ -90,7 +89,6 @@ def process_file_job(self, course_id, file_bytes, original_filename, content_typ
             content=chunk.content,
             course_id=chunk.course_id,
             file_id=chunk.file_id,
-            chapter_title=chunk.chapter_title,
             chunk_index=chunk.chunk_index,
             page_number=chunk.page_number,
         )

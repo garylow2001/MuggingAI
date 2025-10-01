@@ -58,8 +58,6 @@ export interface FileUploadStatusResult {
     total_chunks: number;
     total_words: number;
     average_chunk_size: number;
-    unique_chapters: number;
-    chapters: string[];
   };
   summaries?: {
     chunk_index?: number;

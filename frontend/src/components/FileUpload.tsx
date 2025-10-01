@@ -423,23 +423,6 @@ export function FileUpload({ courseId }: FileUploadProps) {
                 <p>
                   {/* Notes generated field removed, not present in result object */}
                 </p>
-                <p>
-                  <strong>Chapters detected:</strong>{" "}
-                  {uploadResult?.statistics?.unique_chapters}
-                </p>
-                {uploadResult?.statistics?.chapters &&
-                  uploadResult.statistics.chapters.length > 0 && (
-                    <div>
-                      <strong>Chapters:</strong>
-                      <ul className="list-disc list-inside ml-2 mt-1">
-                        {uploadResult.statistics.chapters.map(
-                          (chapter, index) => (
-                            <li key={index}>{chapter}</li>
-                          )
-                        )}
-                      </ul>
-                    </div>
-                  )}
                 <div className="mt-3">
                   <Button
                     onClick={handleGenerateNotes}
