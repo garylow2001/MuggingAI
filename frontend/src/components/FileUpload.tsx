@@ -16,6 +16,8 @@ import {
 } from "@/lib/api";
 import { mutate } from "swr";
 import { useToast } from "@/hooks/use-toast";
+import Lottie from "lottie-react";
+import processFileAnimation from "@/public/File_Search.json";
 
 interface FileUploadProps {
   courseId: number;
@@ -332,25 +334,43 @@ export function FileUpload({ courseId }: FileUploadProps) {
             </div>
           )}
 
-          {/* Modern Progress Status */}
+          {/* Modern Progress Status with Lottie Animation */}
           {isUploading && (
             <div className="space-y-2">
-              <div className="flex flex-col gap-2 mt-2">
-                {jobStatus?.progress_messages?.map(
-                  (msg: string, idx: number) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-primary" />
-                      <span className="text-sm text-gray-800">{msg}</span>
+              <div className="flex flex-row gap-6 items-start mt-2">
+                <div className="flex flex-col gap-2 flex-1">
+                  {jobStatus?.progress_messages?.length > 0 ? (
+                    // Show progress messages
+                    jobStatus.progress_messages.map(
+                      (msg: string, idx: number) => {
+                        const isLast =
+                          idx === jobStatus.progress_messages.length - 1;
+                        return (
+                          <div key={idx} className="flex items-center gap-2">
+                            {isLast && polling ? (
+                              <Loader2 className="h-4 w-4 text-green-600 animate-spin" />
+                            ) : (
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                            )}
+                            <span className="text-sm text-gray-800">{msg}</span>
+                            <span className="ml-2 text-xs text-gray-500">
+                              {(idx + 1) * 20}%
+                            </span>
+                          </div>
+                        );
+                      }
+                    )
+                  ) : (
+                    // Show loading if no messages yet
+                    <div className="flex items-center gap-2 animate-pulse">
+                      <Loader2 className="h-4 w-4 text-gray-400" />
+                      <span className="h-4 w-32 bg-gray-200 rounded" />
                     </div>
-                  )
-                )}
-                {/* Skeleton loader for next message */}
-                {polling && (
-                  <div className="flex items-center gap-2 animate-pulse">
-                    <Loader2 className="h-4 w-4 text-gray-400" />
-                    <span className="h-4 w-32 bg-gray-200 rounded" />
-                  </div>
-                )}
+                  )}
+                </div>
+                <div className="w-32 h-32 flex-shrink-0">
+                  <Lottie animationData={processFileAnimation} loop={true} />
+                </div>
               </div>
             </div>
           )}
