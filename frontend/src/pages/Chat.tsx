@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 // removed unused Input import; using a textarea instead
 import { Send, Bot, User } from "lucide-react";
-// ...existing code...
+import {
+  PromptInput,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputToolbar,
+  PromptInputTools,
+} from "@/components/ui/prompt-input";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { SuggestedFollowUps } from "@/components/SuggestedFollowUps";
-import { Link } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Message {
@@ -31,7 +34,7 @@ export function Chat() {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [courses, setCourses] = useState<{ id: number; name: string }[]>([]);
-  const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
+  const [selectedCourseIds, setSelectedCourseIds] = useState<number[]>([]);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsOpen, setFollowUpsOpen] = useState(false);
   const messagesRef = React.useRef<HTMLDivElement | null>(null);
@@ -56,7 +59,6 @@ export function Chat() {
         const cs = await api.getCourses();
         if (!mounted) return;
         setCourses(cs.map((c: any) => ({ id: c.id, name: c.name })));
-        if (cs.length === 1) setSelectedCourseId(cs[0].id);
       } catch (e) {
         // ignore
       }
@@ -67,7 +69,7 @@ export function Chat() {
   }, []);
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || selectedCourseIds.length === 0) return;
     const userMessage: Message = {
       id: Date.now().toString(),
       content: inputValue,
@@ -82,20 +84,10 @@ export function Chat() {
     setFollowUpsOpen(false);
 
     try {
-      // Call RAG API
-      const params = new URLSearchParams();
-      params.append("query", inputValue.trim());
-      if (selectedCourseId)
-        params.append("course_id", String(selectedCourseId));
-
-      const res = await fetch(
-        `http://localhost:8000/api/rag/query?${params.toString()}`
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "RAG request failed");
-      }
-      const data = await res.json();
+      const data = await api.ragQuery({
+        query: inputValue.trim(),
+        course_ids: selectedCourseIds,
+      });
 
       // Build assistant message with deduplicated sources attached
       let sources: string[] | undefined = undefined;
@@ -123,7 +115,6 @@ export function Chat() {
       setMessages((prev) => [...prev, aiMessage]);
 
       if (data.follow_up_questions && Array.isArray(data.follow_up_questions)) {
-        // store suggestions but do not auto-open the dropdown; user can open the pill
         setFollowUps(data.follow_up_questions);
         setFollowUpsOpen(false);
       }
@@ -137,13 +128,6 @@ export function Chat() {
       setMessages((prev) => [...prev, errMsg]);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
     }
   };
 
@@ -164,6 +148,7 @@ export function Chat() {
           ref={messagesRef}
           className="flex-1 overflow-y-auto space-y-4 px-4 py-6"
         >
+          {/* ...existing message rendering code... */}
           {messages.map((message) => (
             <div
               key={message.id}
@@ -244,25 +229,52 @@ export function Chat() {
           setInputValue={setInputValue}
         />
 
-        {/* Input */}
-        <div className="flex space-x-2 px-4 pb-6">
-          <textarea
-            ref={inputRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder="Ask a question about your course content..."
-            disabled={isLoading}
-            aria-label="Message"
-            className="flex-1 min-h-[44px] max-h-44 resize-none overflow-auto rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-          <Button
-            onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isLoading}
-            size="sm"
+        {/* Refactored input using prompt-input.tsx API */}
+        <div className="px-4 mb-4 w-full">
+          <PromptInput
+            onSubmit={(e: React.FormEvent<HTMLFormElement>) => {
+              e.preventDefault();
+              handleSendMessage();
+            }}
           >
-            <Send className="h-4 w-4" />
-          </Button>
+            <PromptInputTextarea
+              ref={inputRef}
+              value={inputValue}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                setInputValue(e.target.value)
+              }
+              placeholder="Ask a question about your course content..."
+              disabled={isLoading}
+            />
+            <PromptInputToolbar>
+              <PromptInputTools>
+                <MultiSelect
+                  options={courses.map((course) => ({
+                    label: course.name,
+                    value: String(course.id),
+                  }))}
+                  value={selectedCourseIds.map(String)}
+                  onValueChange={(vals: string[]) =>
+                    setSelectedCourseIds(vals.map(Number))
+                  }
+                  placeholder="Course content to query from"
+                  maxCount={3}
+                  searchable={true}
+                  className="min-w-[180px]"
+                />
+              </PromptInputTools>
+              <PromptInputSubmit
+                disabled={
+                  !inputValue.trim() ||
+                  isLoading ||
+                  selectedCourseIds.length === 0
+                }
+                status={isLoading ? "streaming" : "ready"}
+              >
+                <Send className="h-5 w-5" />
+              </PromptInputSubmit>
+            </PromptInputToolbar>
+          </PromptInput>
         </div>
       </div>
     </div>

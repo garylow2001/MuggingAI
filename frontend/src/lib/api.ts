@@ -77,6 +77,18 @@ export interface UploadJobResponse {
   job_id: string;
 }
 
+export interface RagQueryPayload {
+  query: string;
+  course_ids: number[];
+}
+
+export interface RagQueryResponse {
+  answer: string;
+  sources?: any[];
+  follow_up_questions?: string[];
+  error?: string;
+}
+
 // API functions
 export const api = {
   // Courses
@@ -258,5 +270,21 @@ export const api = {
     if (!response.ok) {
       throw new Error("Failed to delete note");
     }
+  },
+
+  // RAG Query
+  async ragQuery(payload: RagQueryPayload): Promise<RagQueryResponse> {
+    const response = await fetch(`${API_BASE_URL}/rag/query`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "RAG request failed");
+    }
+    return response.json();
   },
 };

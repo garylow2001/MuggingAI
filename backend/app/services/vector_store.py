@@ -253,7 +253,7 @@ class VectorStore:
         return chunk_ids
 
     async def search(
-        self, query: str, course_id: Optional[int] = None, limit: int = 5
+        self, query: str, course_ids: Optional[List[int]] = None, limit: int = 5
     ) -> List[Dict[str, Any]]:
         """Search for similar chunks based on query."""
         # Get query embedding
@@ -271,20 +271,15 @@ class VectorStore:
             if idx < len(self.metadata):
                 metadata = self.metadata[idx]
 
-                # Filter by course_id if specified
-                if course_id is not None:
-                    # tolerate int/str mismatches by comparing string forms as fallback
+                # Filter by course_ids if specified
+                if course_ids is not None and len(course_ids) > 0:
                     meta_course = metadata.get("course_id")
                     try:
                         if meta_course is None:
-                            # no course metadata -> skip
                             continue
-                        if isinstance(meta_course, int) and isinstance(course_id, int):
-                            if meta_course != course_id:
-                                continue
-                        else:
-                            if str(meta_course) != str(course_id):
-                                continue
+                        # Accept int/str mismatches
+                        if not any(str(meta_course) == str(cid) for cid in course_ids):
+                            continue
                     except Exception:
                         continue
 
@@ -305,44 +300,60 @@ class VectorStore:
         return results
 
     async def get_chunks_by_course_chapter(
-        self, course_id: int, chapter_title: Optional[str] = None, limit: int = 10
+        self,
+        course_ids: Optional[List[int]] = None,
+        chapter_title: Optional[str] = None,
+        limit: int = 10,
     ) -> List[Dict[str, Any]]:
-        """Get chunks for a specific course and optionally chapter."""
+        """Get chunks for specific courses and optionally chapter."""
         results = []
 
         for metadata in self.metadata:
-            if metadata.get("course_id") == course_id:
-                if (
-                    chapter_title is None
-                    or metadata.get("chapter_title") == chapter_title
-                ):
-                    results.append(
-                        {
-                            "id": metadata["id"],
-                            "content": metadata["content"],
-                            "course_id": metadata.get("course_id"),
-                            "chapter_title": metadata.get("chapter_title"),
-                            "chunk_index": metadata.get("chunk_index"),
-                            "page_number": metadata.get("page_number"),
-                        }
-                    )
+            # Filter by course_ids
+            if course_ids is not None and len(course_ids) > 0:
+                meta_course = metadata.get("course_id")
+                try:
+                    if meta_course is None:
+                        continue
+                    if not any(str(meta_course) == str(cid) for cid in course_ids):
+                        continue
+                except Exception:
+                    continue
+            # If no course_ids, include all
 
-                    if len(results) >= limit:
-                        break
+            if chapter_title is None or metadata.get("chapter_title") == chapter_title:
+                results.append(
+                    {
+                        "id": metadata["id"],
+                        "content": metadata["content"],
+                        "course_id": metadata.get("course_id"),
+                        "chapter_title": metadata.get("chapter_title"),
+                        "chunk_index": metadata.get("chunk_index"),
+                        "page_number": metadata.get("page_number"),
+                    }
+                )
+
+                if len(results) >= limit:
+                    break
 
         # Sort by chunk_index for consistent ordering
         results.sort(key=lambda x: x.get("chunk_index", 0))
         return results
 
-    async def delete_chunks_by_course(self, course_id: int):
-        """Delete all chunks for a specific course."""
+    async def delete_chunks_by_course(self, course_ids: List[int]):
+        """Delete all chunks for specific courses."""
         # This is a simplified implementation
         # In production, you might want to use FAISS's remove_ids method
         # For now, we'll mark them as deleted in metadata
 
+        if not course_ids:
+            return
+
         for metadata in self.metadata:
-            if metadata.get("course_id") == course_id:
-                metadata["deleted"] = True
+            meta_course = metadata.get("course_id")
+            if meta_course is not None:
+                if any(str(meta_course) == str(cid) for cid in course_ids):
+                    metadata["deleted"] = True
 
         self._save_index()
 

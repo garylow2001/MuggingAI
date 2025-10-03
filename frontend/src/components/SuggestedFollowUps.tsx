@@ -30,7 +30,7 @@ export function SuggestedFollowUps({
           </div>
         )}
         {open && (
-          <div className="mt-2 -translate-y-2 w-full max-h-[48vh] overflow-auto px-4 flex flex-col rounded-2xl bg-white/10 backdrop-blur-md border border-slate-200/10 shadow-2xl">
+          <div className="-translate-y-2 w-full max-h-[48vh] overflow-auto pt-4 px-4 flex flex-col rounded-2xl bg-white/10 backdrop-blur-md border border-slate-200/10 shadow-2xl">
             <div className="flex flex-col">
               {followUps.map((q, i) => (
                 <Button
@@ -40,7 +40,7 @@ export function SuggestedFollowUps({
                     setInputValue(q);
                     setOpen(false);
                   }}
-                  className="w-full justify-start px-3 py-2 rounded-lg text-sm hover:bg-gray-100 whitespace-normal break-words overflow-hidden text-left transition-colors"
+                  className="w-full h-fit justify-start px-3 py-2 rounded-lg text-sm hover:bg-gray-100 whitespace-normal break-words overflow-hidden text-left transition-colors"
                 >
                   {q}
                 </Button>
@@ -51,9 +51,9 @@ export function SuggestedFollowUps({
                 variant="ghost"
                 size="sm"
                 onClick={() => setOpen(false)}
-                className="rounded-full w-9 h-9 flex items-center justify-center"
+                className="rounded-full w-9 h-9"
               >
-                <ChevronUp className="h-4 w-4 rotate-180" />
+                <ChevronUp className="rotate-180" />
               </Button>
             </div>
           </div>
