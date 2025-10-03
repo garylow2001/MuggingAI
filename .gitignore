@@ -278,3 +278,6 @@ config.json
 
 # Keep empty directories
 !.gitkeep 
+
+# Database files
+*.rdb
