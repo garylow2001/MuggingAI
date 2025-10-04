@@ -123,7 +123,18 @@ class Chunker:
     def process_file(
         self, file_path: str, course_id: int, file_id: int
     ) -> List[Dict[str, Any]]:
-        """Process a file and return chunks with metadata."""
+        """Process a file and return chunks with metadata.
+        1. Extract text content from the file.
+        2. Chunk the text into smaller pieces.
+        3. Attach metadata (file_id and course_id) to each chunk.
+        Each chunk should have:
+        {
+            "content": content of the chunk,
+            "chunk_index": index of the chunk,
+            "word_count": number of words in the chunk,
+            "course_id": course id saved in DB,
+            "file_id": file id saved in DB,
+        }"""
         text = self.extract_text(file_path)
         chunk_list = self.chunk_text(text)
         for chunk in chunk_list:
@@ -131,7 +142,6 @@ class Chunker:
                 {
                     "course_id": course_id,
                     "file_id": file_id,
-                    "page_number": None,
                 }
             )
         return chunk_list

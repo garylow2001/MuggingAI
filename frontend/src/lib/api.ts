@@ -82,9 +82,15 @@ export interface RagQueryPayload {
   course_ids: number[];
 }
 
+export interface RagQuerySource {
+  course: string;
+  file: string;
+  page: number;
+}
+
 export interface RagQueryResponse {
   answer: string;
-  sources?: any[];
+  sources?: RagQuerySource[];
   follow_up_questions?: string[];
   error?: string;
 }

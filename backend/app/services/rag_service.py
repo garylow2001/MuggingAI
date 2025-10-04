@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.services.rag_retriever import RAGRetriever
 from app.services.vector_store import VectorStore
 from app.services.prompts import clean_formatting
+from app.models.database import Course, File, get_db
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -52,22 +53,41 @@ class RAGService:
         """
         if not retrieved_chunks:
             return ""
+        db = next(get_db())
+
+        # Cache lookups to avoid repeated DB queries
+        course_cache = {}
+        file_cache = {}
 
         context_parts = []
         for i, chunk in enumerate(retrieved_chunks):
             content = clean_formatting(chunk.get("content", ""))
-            chapter = chunk.get("chapter_title", "Unknown")
+            course_id = chunk.get("course_id")
+            if course_id in course_cache:
+                course_name = course_cache[course_id]
+            else:
+                course = db.query(Course).filter(Course.id == course_id).first()
+                course_name = course.name if course else "Unknown"
+                course_cache[course_id] = course_name
+            file_id = chunk.get("file_id")
+            if file_id in file_cache:
+                file_name = file_cache[file_id]
+            else:
+                file = db.query(File).filter(File.id == file_id).first()
+                file_name = file.original_filename if file else "Unknown"
+                file_cache[file_id] = file_name
 
             # Format each chunk with metadata
             context_parts.append(
-                f"[Document {i+1}] Chapter: {chapter}\n" f"{content}\n"
+                f"[Document {i+1}] [Course: {course_name}] [File: {file_name}]\n"
+                f"{content}\n"
             )
 
         return "\n\n".join(context_parts)
 
     def _build_rag_prompt(self, query: str, context: str) -> str:
         """
-        Build a RAG prompt combining the user query and retrieved context.
+        Build a RAG prompt combining the user query and retrieved context, requesting a JSON response.
 
         Args:
             query: User query
@@ -77,21 +97,47 @@ class RAGService:
             Full RAG prompt
         """
         if not context:
-            # If no context, use a standard prompt
             return (
-                f"Answer the following question based on your knowledge:\n\n"
-                f"Question: {query}\n\n"
-                f"Answer:"
+                f"Answer the following question based on your knowledge. Respond in the following JSON format:\n\n"
+                '{"answer": <answer>}'
+                f"\n\nQuestion: {query}\n\n"
             )
 
-        # Build RAG prompt with context
         return (
-            f"Answer the following question based only on the provided context. "
-            f"If the context doesn't contain the information needed, say so - don't make up information.\n\n"
+            "Answer the following question based only on the provided context. "
+            "Take note of the sources that helped answer the question with the course name, file name, and page number(s) as shown in the context. "
+            "Respond in the following JSON format:\n"
+            '{"answer": <answer>, "sources": [{"source_course": <course name>, "source_file": <file name>, "source_page": <page number or range>}]}'
+            "\nIf the context doesn't contain the information needed, say so - don't make up information.\n\n"
             f"Context:\n{context}\n\n"
             f"Question: {query}\n\n"
-            f"Answer:"
         )
+
+    def _post_process_sources(self, sources):
+        """
+        Remove duplicate or invalid sources from the list.
+        """
+        seen = set()
+        result = []
+        for src in sources:
+            # Get values using the source_ prefixed keys from LLM response
+            course = src.get("source_course")
+            file = src.get("source_file")
+            page = src.get("source_page")
+
+            # Skip sources with missing or unknown values
+            if not course or not file or not page:
+                continue
+            if "Unknown" in (course, file, page):
+                continue
+
+            # Deduplicate based on the combination of all fields
+            key = (course, file, page)
+            if key not in seen:
+                seen.add(key)
+                # Create a new source dict with renamed keys for the frontend
+                result.append({"course": course, "file": file, "page": page})
+        return result
 
     async def generate(
         self,
@@ -152,25 +198,32 @@ class RAGService:
                 model=self.model,
                 temperature=self.temperature,
                 max_completion_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
             )
 
-            # Extract answer
-            answer = response.choices[0].message.content.strip()
+            # Extract answer and sources from LLM JSON response
+            raw_content = response.choices[0].message.content.strip()
+            logger.debug(f"LLM raw response: {raw_content}")
+            try:
+                # Try to parse as JSON
+                parsed = json.loads(raw_content)
+                answer = parsed.get("answer", raw_content)
+                sources = parsed.get("sources", [])
+            except Exception:
+                # Fallback: treat whole output as answer
+                logger.warning(
+                    "Failed to parse LLM response as JSON; using raw content as answer"
+                )
+                answer = raw_content
+                sources = []
 
-            logger.info(f"Generated RAG answer ({len(answer)} chars)")
+            # Clean, deduplicate, and transform sources to frontend format
+            processed_sources = self._post_process_sources(sources)
 
-            # Return with metadata
             return {
                 "query": query,
                 "answer": answer,
-                "sources": [
-                    {
-                        "chapter": chunk.get("chapter_title"),
-                        "relevance": chunk.get("score", 0),
-                        "content_preview": chunk.get("content", "")[:100] + "...",
-                    }
-                    for chunk in retrieved_chunks
-                ],
+                "sources": processed_sources,  # Already in the right format with course, file, page keys
                 "source_count": len(retrieved_chunks),
             }
 

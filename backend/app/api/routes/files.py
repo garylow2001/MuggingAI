@@ -113,7 +113,7 @@ async def generate_notes(
         logger.error(f"Course {course_id} not found for note generation")
         raise HTTPException(status_code=404, detail="Course not found")
 
-    # Build chunks_data from DB
+    # Get chunks from DB to prepare for note generation
     query = db.query(Chunk).filter(Chunk.course_id == course_id)
     if file_id is not None:
         query = query.filter(Chunk.file_id == file_id)

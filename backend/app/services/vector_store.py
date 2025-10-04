@@ -289,7 +289,7 @@ class VectorStore:
                         "content": metadata["content"],
                         "score": float(score),
                         "course_id": metadata.get("course_id"),
-                        "chapter_title": metadata.get("chapter_title"),
+                        "file_id": metadata.get("file_id"),
                         "chunk_index": metadata.get("chunk_index"),
                     }
                 )
