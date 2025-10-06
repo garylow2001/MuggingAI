@@ -131,8 +131,6 @@ async def generate_notes(
             {
                 "content": c.content,
                 "chunk_index": c.chunk_index,
-                "chapter_title": c.chapter_title,
-                "page_number": c.page_number,
                 "course_id": c.course_id,
                 "file_id": c.file_id,
             }
@@ -168,7 +166,7 @@ async def generate_notes(
             db.commit()
             db.refresh(topic)
 
-        raw_content = note_data.get("notes_content", note_data.get("notes", ""))
+        raw_content = note_data.get("notes_content")
 
         if isinstance(raw_content, list):
             note_content = "\n".join(

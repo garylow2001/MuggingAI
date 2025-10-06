@@ -1,92 +1,104 @@
-import React, { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Plus, BookOpen, FileText, Brain, ArrowRight, Edit, Trash2 } from 'lucide-react'
-import { CreateCourseModal } from '@/components/CreateCourseModal'
-import { api, Course } from '@/lib/api'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Plus,
+  BookOpen,
+  FileText,
+  Brain,
+  ArrowRight,
+  Edit,
+  Trash2,
+} from "lucide-react";
+import { CreateCourseModal } from "@/components/CreateCourseModal";
+import { api, Course } from "@/lib/api";
+import { useNavigate } from "react-router-dom";
 
 export function Dashboard() {
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [courses, setCourses] = useState<Course[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState('')
-  const navigate = useNavigate()
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
-    loadCourses()
-  }, [])
+    loadCourses();
+  }, []);
 
   const loadCourses = async () => {
     try {
-      setIsLoading(true)
-      const fetchedCourses = await api.getCourses()
-      setCourses(fetchedCourses)
+      setIsLoading(true);
+      const fetchedCourses = await api.getCourses();
+      setCourses(fetchedCourses);
     } catch (err) {
-      setError('Failed to load courses')
-      console.error('Error loading courses:', err)
+      setError("Failed to load courses");
+      console.error("Error loading courses:", err);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleCreateCourse = async (name: string, description: string) => {
     try {
-      const newCourse = await api.createCourse({ name, description })
-      setCourses(prev => [...prev, newCourse])
+      const newCourse = await api.createCourse({ name, description });
+      setCourses((prev) => [...prev, newCourse]);
     } catch (err) {
-      throw err // Re-throw to let the modal handle the error
+      throw err; // Re-throw to let the modal handle the error
     }
-  }
+  };
 
   const handleDeleteCourse = async (courseId: number) => {
-    if (!confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
-      return
+    if (
+      !confirm(
+        "Are you sure you want to delete this course? This action cannot be undone."
+      )
+    ) {
+      return;
     }
 
     try {
-      await api.deleteCourse(courseId)
-      setCourses(prev => prev.filter(course => course.id !== courseId))
+      await api.deleteCourse(courseId);
+      setCourses((prev) => prev.filter((course) => course.id !== courseId));
     } catch (err) {
-      alert('Failed to delete course')
-      console.error('Error deleting course:', err)
+      alert("Failed to delete course");
+      console.error("Error deleting course:", err);
     }
-  }
+  };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString()
-  }
+    return new Date(dateString).toLocaleDateString();
+  };
 
   const getStepTitle = (step: number) => {
     const titles = {
-      1: 'Create Course',
-      2: 'Upload Files',
-      3: 'Generate Quizzes',
-      4: 'Study Mode'
-    }
-    return titles[step as keyof typeof titles]
-  }
+      1: "Create Course",
+      2: "Upload Files",
+      3: "Generate Learning Content",
+      4: "Study Mode",
+    };
+    return titles[step as keyof typeof titles];
+  };
 
   const getStepDescription = (step: number) => {
     const descriptions = {
-      1: 'Start by creating a new course to organize your learning materials',
-      2: 'Upload your PDFs, DOCX files, or text documents to process',
-      3: 'Let AI create summaries, key points, and interactive quizzes',
-      4: 'Study with AI-generated content and test your knowledge'
-    }
-    return descriptions[step as keyof typeof descriptions]
-  }
+      1: "Start by creating a new course to organize your learning materials",
+      2: "Upload your PDFs, DOCX files, or text documents to process",
+      3: "Let AI create summarized notes, key points, and interactive quizzes",
+      4: "Study with AI-generated content and test your knowledge",
+    };
+    return descriptions[step as keyof typeof descriptions];
+  };
 
   const getStepIcon = (step: number) => {
     const icons = {
       1: BookOpen,
       2: FileText,
       3: Brain,
-      4: BookOpen
-    }
-    const Icon = icons[step as keyof typeof icons]
-    return <Icon className="h-6 w-6 text-primary" />
-  }
+      4: BookOpen,
+    };
+    const Icon = icons[step as keyof typeof icons];
+    return <Icon className="h-6 w-6 text-primary" />;
+  };
 
   return (
     <div className="space-y-8">
@@ -96,14 +108,15 @@ export function Dashboard() {
           Welcome to MindCrush
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Transform your lengthy educational materials into digestible, interactive learning experiences with AI.
+          Transform your lengthy educational materials into digestible,
+          interactive learning experiences with AI.
         </p>
       </div>
 
       {/* Step-by-Step Flow */}
       <div className="space-y-6">
         <h2 className="text-2xl font-semibold text-center">How It Works</h2>
-        
+
         <div className="flex flex-col lg:flex-row items-center justify-center gap-4">
           {[1, 2, 3, 4].map((step, index) => (
             <React.Fragment key={step}>
@@ -122,7 +135,7 @@ export function Dashboard() {
                   </p>
                 </CardContent>
               </Card>
-              
+
               {/* Arrow between cards (except after the last card) */}
               {index < 3 && (
                 <div className="hidden lg:flex items-center">
@@ -136,7 +149,7 @@ export function Dashboard() {
 
       {/* Create Course Button */}
       <div className="text-center">
-        <Button 
+        <Button
           onClick={() => setIsCreateModalOpen(true)}
           size="lg"
           className="px-8 py-6 text-lg"
@@ -172,10 +185,7 @@ export function Dashboard() {
               <p className="text-sm text-muted-foreground mt-1 mb-4">
                 Create your first course to get started
               </p>
-              <Button 
-                onClick={() => setIsCreateModalOpen(true)} 
-                size="lg"
-              >
+              <Button onClick={() => setIsCreateModalOpen(true)} size="lg">
                 <Plus className="h-4 w-4 mr-2" />
                 Create Your First Course
               </Button>
@@ -183,8 +193,8 @@ export function Dashboard() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {courses.map((course) => (
-                <Card 
-                  key={course.id} 
+                <Card
+                  key={course.id}
                   className="hover:shadow-md transition-shadow cursor-pointer group"
                   onClick={() => navigate(`/course/${course.id}`)}
                 >
@@ -198,7 +208,7 @@ export function Dashboard() {
                           variant="ghost"
                           size="sm"
                           onClick={(e) => {
-                            e.stopPropagation()
+                            e.stopPropagation();
                             // TODO: Implement edit functionality
                           }}
                         >
@@ -208,8 +218,8 @@ export function Dashboard() {
                           variant="ghost"
                           size="sm"
                           onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeleteCourse(course.id)
+                            e.stopPropagation();
+                            handleDeleteCourse(course.id);
                           }}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -242,5 +252,5 @@ export function Dashboard() {
         onSubmit={handleCreateCourse}
       />
     </div>
-  )
-} 
+  );
+}

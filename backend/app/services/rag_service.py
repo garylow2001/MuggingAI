@@ -359,6 +359,7 @@ class RAGService:
                 model=self.model,
                 temperature=0.7,
                 max_completion_tokens=256,
+                response_format={"type": "json_object"},
             )
 
             # Extract and parse the response
