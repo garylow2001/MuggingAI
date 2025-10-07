@@ -364,27 +364,10 @@ class RAGService:
 
             # Extract and parse the response
             content = response.choices[0].message.content.strip()
-
-            # Try to extract a JSON array
-            match = re.search(r"\[(.*)\]", content, re.DOTALL)
-            if match:
-                try:
-                    # Try to parse as JSON
-                    questions_json = json.loads(f"[{match.group(1)}]")
-                    return questions_json[:num_questions]
-                except json.JSONDecodeError:
-                    # Fallback to regex extraction
-                    pass
-
-            # Fallback: extract questions based on numbering
-            questions = re.findall(r"(?:\d+\.|\-)\s*(.+?)(?=\n\d+\.|\n\-|$)", content)
-            if questions:
-                return questions[:num_questions]
-
-            # Final fallback: split by newlines
-            lines = [line.strip() for line in content.split("\n") if line.strip()]
-            return lines[:num_questions]
+            questions_json = json.loads(content)
+            return questions_json[:num_questions]
 
         except Exception as e:
             logger.error(f"Error generating follow-up questions: {str(e)}")
+            # Default fallback question
             return [f"What else can you tell me about {query}?"]

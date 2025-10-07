@@ -18,7 +18,6 @@ Transform lengthy educational materials into digestible, interactive learning ex
 - **React** with **Vite** for fast development
 - **ShadCN UI** for beautiful, accessible components
 - **Zustand** for state management
-- **TanStack Query** for data fetching
 - **useSWR** for fast, lightweight and reusable data fetching and caching
 
 ### Backend

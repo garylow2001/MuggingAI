@@ -25,7 +25,7 @@ class RAGRetriever:
         query: str,
         course_ids: Optional[List[int]] = None,
         limit: int = 5,
-        rerank: bool = True,
+        rerank: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Retrieve relevant context chunks for a given query.
