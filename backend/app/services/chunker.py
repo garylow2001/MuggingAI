@@ -99,7 +99,7 @@ class Chunker:
                         "word_count": current_length,
                     }
                 )
-                # Start new chunk with overlap
+                # Start new chunk with overlap of last 3 sentences
                 overlap_sentences = (
                     current_chunk[-3:] if len(current_chunk) >= 3 else current_chunk
                 )
